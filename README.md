@@ -6,7 +6,29 @@ MLX port of **Lance** for Apple Silicon. Lance is a 3B-active / ~12B-total param
 
 ## Status
 
-🚧 **Pre-alpha — port in progress.** See [HANDOFF.md](./HANDOFF.md) for the phased roadmap (start with the **⚠ Verified findings (2026-05-19)** section — it supersedes earlier guesses). Phase 0 parity-oracle capture runbook lives at [Docs/RUNPOD_PHASE0.md](./Docs/RUNPOD_PHASE0.md).
+🟢 **Alpha — x2t_image (VQA) working end-to-end on Apple Silicon as of 2026-05-20.**
+
+| Capability | Status |
+|---|---|
+| Convert HF safetensors → MLX bf16 (both checkpoints) | ✅ `scripts/02_convert.py` |
+| Load `Lance_3B` + `Lance_3B_Video` into `LanceModel` | ✅ 0 missing keys, dummy forward verified |
+| x2t_image VQA (image → text answer) | ✅ MVP, ~95% parity vs PyTorch oracle |
+| KV cache for fast autoregressive decode | ⏳ Phase 2.1 |
+| t2i / image_edit (image generation) | ⏳ Phase 3 |
+| t2v / video_edit (video generation) | ⏳ Phase 4 |
+| 8-bit + 4-bit quants + HF publish | ⏳ Phase 5 |
+
+**Try it:**
+```bash
+# After downloading + converting weights (see Docs/RUNPOD_PHASE0.md → scripts/02_convert.py):
+HF_HUB_DISABLE_XET=1 uv run python scripts/04_x2t_image_demo.py \
+    --case 03 \
+    --lance-weights ~/models/mlx/Lance-3B-bf16 \
+    --vit-weights   ~/models/mlx/Lance-3B-Video-bf16/vit.safetensors
+# Asks Lance about a license plate in tests/fixtures/images/image-understanding-case-03.png.
+```
+
+See [HANDOFF.md](./HANDOFF.md) for the phased roadmap (start with the **⚠ Verified findings (2026-05-19)** section — it supersedes earlier guesses). Phase 0 parity-oracle capture runbook lives at [Docs/RUNPOD_PHASE0.md](./Docs/RUNPOD_PHASE0.md). Per-phase technical notes in [notes/](./notes/).
 
 ## Quick start (after Phase 5)
 
