@@ -1,0 +1,41 @@
+lance-mlx
+=========
+
+This product includes software derived from the following projects, all of which
+are licensed under the Apache License, Version 2.0.
+
+  Lance: Unified Multimodal Modeling by Multi-Task Synergy
+      Copyright (c) ByteDance Intelligent Creation Lab
+      https://github.com/bytedance/Lance
+      https://huggingface.co/bytedance-research/Lance
+      arXiv:2605.18678
+
+  Wan2.2 — Image and Video Generation Foundation Model (VAE used in Lance)
+      Copyright (c) Alibaba Group / Wan-AI team
+      https://huggingface.co/Wan-AI
+
+  Qwen2.5-VL (vision encoder + LLM initialization used by Lance)
+      Copyright (c) Alibaba Group / Qwen team
+      https://huggingface.co/Qwen
+
+  mlx-vlm (Qwen2.5-VL MLX substrate)
+      Copyright (c) Prince Canuma and contributors
+      https://github.com/Blaizzy/mlx-vlm
+
+  mlx-video (Wan2.2 VAE + flow-matching sampler MLX substrate)
+      Copyright (c) Prince Canuma and contributors
+      https://github.com/Blaizzy/mlx-video
+
+  MLX (Apple machine learning framework)
+      Copyright (c) 2023 Apple Inc.
+      https://github.com/ml-explore/mlx
+
+
+lance-mlx itself is licensed under the Apache License, Version 2.0:
+
+  Copyright (c) 2026 MVS Collective
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+      http://www.apache.org/licenses/LICENSE-2.0

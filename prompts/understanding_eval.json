@@ -1,0 +1,47 @@
+{
+  "_comment": "Frozen x2t (understanding) evaluation set. Paired with reference images/videos in tests/fixtures/. Greedy decode (do_sample=False) for parity testing.",
+  "prompts": [
+    {
+      "id": "u01_colosseum",
+      "task": "x2t_image",
+      "image": "tests/fixtures/x2t_image/u01_colosseum/input.png",
+      "prompt": "What is the structure shown in the image and what is its historical significance?"
+    },
+    {
+      "id": "u02_pie_chart",
+      "task": "x2t_image",
+      "image": "tests/fixtures/x2t_image/u02_pie_chart/input.png",
+      "prompt": "Summarize the main findings shown in this chart in 3 bullet points."
+    },
+    {
+      "id": "u03_eclipse",
+      "task": "x2t_image",
+      "image": "tests/fixtures/x2t_image/u03_eclipse/input.png",
+      "prompt": "Describe the astronomical event captured in this image."
+    },
+    {
+      "id": "u04_market_research",
+      "task": "x2t_image",
+      "image": "tests/fixtures/x2t_image/u04_market_research/input.png",
+      "prompt": "What does this market research chart suggest about user preferences?"
+    },
+    {
+      "id": "u05_license_plate",
+      "task": "x2t_image",
+      "image": "tests/fixtures/x2t_image/u05_license_plate/input.png",
+      "prompt": "Describe what you see in this photo, including any text visible."
+    },
+    {
+      "id": "uv01_caption",
+      "task": "x2t_video",
+      "video": "tests/fixtures/x2t_video/uv01_caption/input.mp4",
+      "prompt": "Describe what happens in this video in 2-3 sentences."
+    },
+    {
+      "id": "uv02_count",
+      "task": "x2t_video",
+      "video": "tests/fixtures/x2t_video/uv02_count/input.mp4",
+      "prompt": "How many distinct actions occur in this clip, and what are they?"
+    }
+  ]
+}

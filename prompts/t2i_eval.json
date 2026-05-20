@@ -1,0 +1,72 @@
+{
+  "_comment": "Frozen T2I evaluation set for Lance. Same as Phase 0 reference oracle so parity comparison is apples-to-apples. Neutral content (no NSFW). seed=42 across all prompts to keep cross-quant comparisons fair.",
+  "defaults": {
+    "task": "t2i",
+    "seed": 42,
+    "steps": 30,
+    "cfg": 4.0,
+    "resolution": 768
+  },
+  "prompts": [
+    {
+      "id": "p01_fox_grass",
+      "category": "photorealistic_animal",
+      "prompt": "A red fox cautiously stepping through tall summer grass at golden hour, naturalistic, shallow depth of field.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p02_chef",
+      "category": "human_action",
+      "prompt": "A chef in a white apron plating a dish in a bright modern kitchen, soft window light.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p03_coastline",
+      "category": "landscape",
+      "prompt": "Aerial view of a rugged coastline at sunset, waves crashing against cliffs, cinematic.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p04_anime_street",
+      "category": "stylized_anime",
+      "prompt": "A quiet anime street scene at dusk, paper lanterns swaying gently in the breeze, cherry blossom petals drifting.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p05_pixar_sloth",
+      "category": "stylized_3d",
+      "prompt": "A Pixar-style 3D animated sloth reaching for a leaf, expressive eyes, soft studio lighting.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p06_neon_alley",
+      "category": "atmospheric",
+      "prompt": "Rain-soaked neon alley in a cyberpunk city at night, reflections in puddles, no people.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p07_forest_mist",
+      "category": "atmospheric",
+      "prompt": "A misty old-growth forest at dawn, shafts of light through tall pines, ferns on the forest floor.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p08_macro_water",
+      "category": "macro_detail",
+      "prompt": "Close-up macro shot of clear water pouring into a crystal glass, bubbles rising, soft natural backlight.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p09_grandmother",
+      "category": "human_portrait",
+      "prompt": "Portrait of an elderly grandmother smiling warmly, soft natural window light, kind eyes.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    },
+    {
+      "id": "p10_typography",
+      "category": "text_rendering",
+      "prompt": "A vintage hand-lettered sign reading 'Open' hanging in a coffee shop window, warm interior lighting visible behind.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 768
+    }
+  ]
+}

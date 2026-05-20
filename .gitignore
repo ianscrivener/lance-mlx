@@ -1,0 +1,28 @@
+# Outputs (keep .gitkeep so directory is tracked)
+outputs/**
+!outputs/.gitkeep
+
+# Vendor clones (read-only)
+vendor/**
+!vendor/.gitkeep
+
+# Notes are tracked, but exclude large key dumps
+notes/*_keys_full.txt
+
+# Tests fixtures — large reference outputs from cloud GPU runs
+tests/fixtures/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.uv/
+.ruff_cache/
+.pytest_cache/
+
+# Local models (never committed; users download to ~/models/)
+models/
+
+# OS
+.DS_Store

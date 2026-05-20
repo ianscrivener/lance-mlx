@@ -1,0 +1,62 @@
+{
+  "_comment": "Frozen T2V evaluation set for Lance. 480p × 50 frames @ 12 fps per upstream defaults. seed=42 across all prompts.",
+  "defaults": {
+    "task": "t2v",
+    "seed": 42,
+    "steps": 30,
+    "cfg": 4.0,
+    "resolution": 480,
+    "frames": 50,
+    "fps": 12
+  },
+  "prompts": [
+    {
+      "id": "v01_horse_meadow",
+      "category": "complex_motion",
+      "prompt": "A horse galloping across an open meadow under a partly cloudy sky, mane flowing, side-tracking camera, telephoto compression.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v02_reef",
+      "category": "complex_environment",
+      "prompt": "Tropical reef teeming with schools of small fish darting between coral, sunlight filtering through clear water, slow camera drift.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v03_neon_rain",
+      "category": "atmospheric_dynamic",
+      "prompt": "Rain-soaked neon alley in a cyberpunk city at night, rain falling, reflections shimmering in puddles, steam rising.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v04_dancer",
+      "category": "human_choreography",
+      "prompt": "A contemporary dancer rehearsing in a sunlit studio, slow controlled movement, dust motes in the light.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v05_lightning",
+      "category": "dynamic_lighting",
+      "prompt": "A distant thunderstorm over the great plains at twilight, occasional lightning illuminating the clouds.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v06_pixar_running",
+      "category": "stylized_motion",
+      "prompt": "A Pixar-style 3D animated rabbit hopping through a cartoon meadow with exaggerated motion and squash-and-stretch.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v07_anime_train",
+      "category": "stylized_anime",
+      "prompt": "An anime-style scene of a train passing through a snowy mountain pass at twilight, soft falling snow.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    },
+    {
+      "id": "v08_anime_drink",
+      "category": "stylized_macro",
+      "prompt": "Close-up of hot coffee being poured into a ceramic mug, steam rising, kitchen counter softly out of focus.",
+      "seed": 42, "steps": 30, "cfg": 4.0, "resolution": 480, "frames": 50, "fps": 12
+    }
+  ]
+}
