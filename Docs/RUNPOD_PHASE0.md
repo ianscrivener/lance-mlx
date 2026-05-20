@@ -354,6 +354,12 @@ Verify your balance is decreasing as expected — should be **~$3 spent, not $30
 - **`pip install ...` fails on `pkg_resources` / `pkgutil.ImpImporter`** — old setuptools in pip's PEP 517 isolation env can't run on py312. Add `--no-build-isolation` so the outer env's modern setuptools is used.
 - **Generally: requirements.txt pins from Lance assume Python 3.10/3.11.** Other old pinned packages may also fail to build on py312. The pattern when a pin fails: bump it to the first version with a py312 wheel (PyPI's release page shows wheel filenames), keeping the major version unchanged. Common candidates beyond numpy: any package whose `requirements.txt` version is pre-Oct-2023. Confirmed bumps from the 2026-05-20 run: `numpy==1.24.4 → >=1.26.0,<2.0` and `scipy==1.10.1 → >=1.11.4,<1.14`.
 - **`gpustat` (or other older packages) fails with `ImportError: setuptools_scm not found`.** Build helper isn't in the outer env (we turned off pip's build isolation). Pre-install before retrying: `pip install setuptools_scm versioneer hatchling poetry-core`.
+- **`phase0_04_t2v_simple.sh` fails silently with `json.decoder.JSONDecodeError` in the log.** Lance's shipped `config/examples/t2v_example.json` is not strict JSON — has a trailing comma or unquoted key around line 10. Their own inference code can't parse it. Fix before running t2v:
+  ```bash
+  pip install json5
+  python -c "import json5, json; d = json5.load(open('config/examples/t2v_example.json')); json.dump(d, open('config/examples/t2v_example.json', 'w'), indent=2, ensure_ascii=False)"
+  ```
+  (Read with the tolerant json5 parser, re-emit as strict JSON. Idempotent.) Beware: a `for s in ...; do bash $s; done` loop without `set -e` continues past this failure silently — verify each task wrote its results dir at the end.
 - **`flash_attn` `ImportError: undefined symbol: ...` after `pip install -r requirements.txt`.** Lance's requirements.txt pins `torch==2.5.1`, which pip honors and SILENTLY DOWNGRADES the template's torch 2.8.0+cu128 to 2.5.1+cu124. That breaks the flash-attn .so we just built (ABI-keyed to torch 2.8 / CUDA 12.8). Fix: re-upgrade torch back to 2.8 *after* installing requirements:
   ```bash
   pip install --upgrade --force-reinstall torch==2.8.0 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
