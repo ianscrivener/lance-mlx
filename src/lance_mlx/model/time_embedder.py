@@ -5,6 +5,18 @@ sinusoidal frequency embedding → 2-layer MLP → hidden_size-dim vector. The
 output is ADDED INTO THE TOKEN-EMBEDDING STREAM (alongside word embeddings)
 before the LLM forward pass — not consumed inside the flow head. That
 propagation is what lets `flow_head.llm2vae` be a single Linear.
+
+⚠ Safetensors key mapping (verified Phase 1a, 2026-05-20):
+
+    safetensors key                          → MLX scaffold attribute
+    -----------------------------------------------------------------
+    time_embedder.mlp.0.{weight,bias}        → time_embedder.proj_in.{weight,bias}
+    time_embedder.mlp.2.{weight,bias}        → time_embedder.proj_out.{weight,bias}
+
+The upstream uses `nn.Sequential(Linear, SiLU, Linear)` so the indices
+0 and 2 are the two Linears and 1 is the SiLU (no params). Our scaffold
+uses descriptive names `proj_in` / `proj_out` instead — `scripts/02_convert.py`
+must apply this two-rule rename when loading the safetensors.
 """
 
 from __future__ import annotations

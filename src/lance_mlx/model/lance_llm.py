@@ -23,6 +23,13 @@ Resolved questions (verified against `modeling/lance/qwen2_navit.py`):
    `q_norm`, `k_norm`, `q_norm_moe_gen`, `k_norm_moe_gen` — each over
    `head_dim=128`. Tiny in params, but separate state-dict entries each.
 
+   ⚠ Phase-1a empirical correction (2026-05-20): the **final** RMSNorm is
+   ALSO per-expert. `model.norm` (UND) and `model.norm_moe_gen` (GEN) are
+   BOTH present in the safetensors, each [2048]. Total RMSNorm count is
+   therefore 146, not 144. Applied at the end of the layer stack, routed
+   by `position_group` per-token (UND tokens → `self.norm`, GEN tokens
+   → `self.norm_moe_gen`).
+
 3. **Routing is strict per-token; NO cross-expert blending.** Each token
    passes through exactly one expert's input-layernorm → attention → MLP path
    and the result is written back via index assignment to a zero-init buffer
@@ -133,7 +140,8 @@ class LanceMoTLayer(nn.Module):
 
 
 class LanceModel(nn.Module):
-    """Full Lance LLM backbone — 36 LanceMoTLayer + embeddings + UNTIED lm_head.
+    """Full Lance LLM backbone — 36 LanceMoTLayer + embeddings + UNTIED lm_head
+    + per-expert final RMSNorms.
 
     Does NOT include the ViT or VAE — those are vendored from mlx-vlm and
     mlx-video respectively (see the pipeline modules for orchestration).
@@ -141,14 +149,32 @@ class LanceModel(nn.Module):
     Critical: do NOT tie `lm_head.weight` to `embed_tokens.weight`. Load both
     as independent tensors from the safetensors — the JSON's
     `tie_word_embeddings: true` is overridden at runtime by `untie_lm_head()`.
+
+    Phase-1a empirical additions to the layout (not in original scaffold):
+      - `self.norm_moe_gen` — second final RMSNorm for GEN tokens; sibling of
+        `self.norm`. Routed by `position_group` at the end of the layer stack.
+      - `self.vae_in_proj` (VAEInputProjection, vae_bridge.py) — applied to
+        VAE-latent token features at input time before they join the stream.
+      - `self.latent_pos_embed` (LatentPosEmbed, latent_pos_embed.py) — added
+        to VAE-latent token hidden states for spatial-grid positional info.
+      - `self.time_embedder` (TimestepEmbedder, time_embedder.py) — broadcast
+        added to ALL token positions in the stream during flow-matching steps.
+      - The flow head `self.llm2vae` (FlowHead, flow_head.py) hangs off this
+        model; called on hidden states at noisy-VAE positions after `self.norm_moe_gen`.
     """
 
     def __init__(self, config: dict):
         super().__init__()
         # self.embed_tokens = nn.Embedding(config["vocab_size"], config["hidden_size"])
         # self.layers = [LanceMoTLayer(config) for _ in range(config["num_hidden_layers"])]
-        # self.norm = nn.RMSNorm(config["hidden_size"], eps=config["rms_norm_eps"])
+        # self.norm = nn.RMSNorm(config["hidden_size"], eps=config["rms_norm_eps"])           # UND
+        # self.norm_moe_gen = nn.RMSNorm(config["hidden_size"], eps=config["rms_norm_eps"])   # GEN (Phase-1a empirical)
         # self.lm_head = nn.Linear(config["hidden_size"], config["vocab_size"], bias=False)
+        # # Phase-1a empirical additions:
+        # self.vae_in_proj = VAEInputProjection(latent_channels=48, hidden_size=config["hidden_size"])
+        # self.latent_pos_embed = LatentPosEmbed(max_latent_size=64, hidden_size=config["hidden_size"])
+        # self.time_embedder = TimestepEmbedder(hidden_size=config["hidden_size"])
+        # self.llm2vae = FlowHead(hidden_size=config["hidden_size"], latent_channels=48)
         ...
 
     def __call__(

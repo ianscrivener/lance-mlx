@@ -18,6 +18,15 @@ Output channel count: 48 — equals `latent_patch_size[0]*[1]*[2]*z_channels`
 with the shipped `--latent_patch_size 1 1 1 --max_latent_size 64` and
 Wan2.2 VAE `z_channels=48`. NOT 16. (The 16/48 confusion was the Wan2.2
 public-distribution footgun; Lance bundles its own correct 48-ch VAE.)
+
+⚠ Empirical correction 2026-05-20 (Phase 1a weight inspection):
+HANDOFF.md's "bias=False" claim was wrong. The actual safetensors contains
+BOTH `llm2vae.weight` [48, 2048] AND `llm2vae.bias` [48]. The Linear must
+be instantiated with `bias=True` for the converter to find a destination
+for the bias tensor. See `notes/phase1a_keys.md` D1 for evidence.
+
+Symmetric note: `vae2llm` (the input-side projection from 48-ch VAE latents
+into the 2048-hidden LLM stream) lives in `vae_bridge.py` — also has a bias.
 """
 
 from __future__ import annotations
@@ -36,15 +45,18 @@ DEFAULT_CFG_TEXT_SCALE = 4.0           # `--cfg_text_scale 4.0`
 class FlowHead(nn.Module):
     """One Linear from LLM_GEN hidden state to flow-matching velocity.
 
-    This mirrors upstream `self.llm2vae = nn.Linear(hidden_size, patch_latent_dim)`
-    where `patch_latent_dim = 48` under the shipped config. No bias on the
-    upstream linear (`bias=False`).
+    Mirrors upstream `self.llm2vae = nn.Linear(hidden_size, patch_latent_dim)`
+    where `patch_latent_dim = 48` under the shipped config.
+
+    bias=True: empirically confirmed by Phase 1a key inspection — both
+    `llm2vae.weight [48, 2048]` and `llm2vae.bias [48]` exist in the
+    actual safetensors (despite the original handoff's bias=False claim).
     """
 
     def __init__(self, hidden_size: int = DEFAULT_HIDDEN_SIZE,
                  latent_channels: int = DEFAULT_LATENT_CHANNELS):
         super().__init__()
-        self.llm2vae = nn.Linear(hidden_size, latent_channels, bias=False)
+        self.llm2vae = nn.Linear(hidden_size, latent_channels, bias=True)
 
     def __call__(self, h: mx.array) -> mx.array:
         """

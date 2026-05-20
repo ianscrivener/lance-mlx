@@ -9,6 +9,7 @@ from .flow_head import (
     timestep_schedule,
 )
 from .lance_llm import LanceModel, LanceMoTLayer
+from .latent_pos_embed import LatentPosEmbed
 from .mape import (
     ANCHOR_IMAGE_GEN,
     ANCHOR_VIDEO_GEN,
@@ -23,6 +24,7 @@ from .routing import (
     merge_expert_outputs,
 )
 from .time_embedder import TimestepEmbedder, sinusoidal_timestep_embedding
+from .vae_bridge import VAEInputProjection
 
 __all__ = [
     "ANCHOR_IMAGE_GEN",
@@ -34,9 +36,11 @@ __all__ = [
     "FlowHead",
     "LanceModel",
     "LanceMoTLayer",
+    "LatentPosEmbed",
     "POSITION_GROUP_TO_EXPERT",
     "PositionGroup",
     "TimestepEmbedder",
+    "VAEInputProjection",
     "build_index_tensors_from_position_group",
     "euler_step",
     "expert_mask_from_position_group",
