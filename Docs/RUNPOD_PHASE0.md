@@ -24,6 +24,47 @@ your Mac.
 | **Cost (realistic)** | **~$3–5 actual** at $1.40–1.50/hr |
 | **Cost (budget w/ buffer)** | **~$10–15** (covers a re-run + accidental over-runs) |
 
+## Cached flash-attn wheel — environment spec to match
+
+flash-attn 2.6.3 has no prebuilt wheel for `torch 2.8 / py 3.12 / cu12.x` on PyPI,
+so pip falls back to a source build that takes **~5 hours** of pod time. We
+captured the wheel once (2026-05-20) at
+`tests/fixtures/saved-wheels/flash_attn-2.6.3-cp312-cp312-linux_x86_64.whl`
+(178 MB) — keeping that file means future pod sessions skip the 5-hour build
+entirely (one `pip install --no-deps wheel.whl` = ~30 seconds).
+
+The wheel is tightly bound to the build environment. To reuse it, **the future
+pod must match this tuple** (or the wheel won't load):
+
+| Component | Built against | Notes |
+|---|---|---|
+| OS | Ubuntu 24.04.3 LTS | manylinux_2_28 baseline |
+| Python | 3.12 (`cp312`) | wheel filename encodes this |
+| PyTorch | **2.8.0+cu128** | abi=cxx11abiTRUE (pip-default) |
+| CUDA runtime | **12.8** | per `torch.version.cuda` |
+| nvcc / CUDA toolkit | **12.8.93** | what compiled the kernels |
+| NVIDIA driver | **565.57.01** (CUDA 12.7-capable) | any driver supporting CUDA ≥12.4 works via forward-compat |
+| GPU archs in wheel | **sm_80 + sm_90** | A100, H100, H200; sm_86/89 not included |
+
+**Pick a RunPod template that matches.** As of 2026-05-20:
+- `RunPod PyTorch 2.8` (CUDA 12.8) template — matches exactly.
+- Any future "PyTorch 2.8" template with CUDA 12.x driver should be compatible.
+- If you can only get a PyTorch 2.6/2.7 template, the wheel will likely fail to
+  load (`undefined symbol` errors at import); rebuild from source on that env.
+
+**Usage on a fresh pod (replaces §3's flash-attn line):**
+
+```bash
+# Upload your cached wheel to the pod first via scp:
+#   scp -P <port> -i ~/.ssh/id_ed25519 \
+#       /Volumes/DEV_VOL1/VideoResearch/lance-mlx/tests/fixtures/saved-wheels/flash_attn-2.6.3-cp312-cp312-linux_x86_64.whl \
+#       root@<host>:/lance/
+
+# Then on the pod, instead of building from source:
+pip install --no-deps /lance/flash_attn-2.6.3-cp312-cp312-linux_x86_64.whl
+python -c "import torch, flash_attn; print('ok', torch.__version__, flash_attn.__version__)"
+```
+
 ## Cost breakdown (rounded, 2026 prices)
 
 Pricing fluctuates; check runpod.io at booking time. Current ballpark for
@@ -105,10 +146,18 @@ git clone https://github.com/bytedance/Lance.git
 cd Lance
 pip install -U pip
 
-# flash-attn first, with --no-build-isolation. Its setup.py imports torch at build
-# time to read CUDA arch info, but pip's default PEP 517 build isolation runs setup.py
-# in a fresh venv where torch isn't visible → ModuleNotFoundError: No module named 'torch'.
-# --no-build-isolation tells pip to use the outer env (where torch IS installed).
+# flash-attn install — TWO paths:
+#
+# (A) FAST PATH — if you have the cached wheel (see "Cached flash-attn wheel"
+#     section above): scp it to the pod first, then:
+#         pip install --no-deps /lance/flash_attn-2.6.3-*.whl
+#     ~30 seconds. Only works if your pod matches the env spec table above.
+#
+# (B) FROM-SOURCE BUILD — first time, or if pod env doesn't match the cached wheel.
+#     ~5 hours of nvcc compile time. Use --no-build-isolation: flash-attn's setup.py
+#     imports torch at build time to read CUDA arch info, but pip's default PEP 517
+#     build isolation runs setup.py in a fresh venv where torch isn't visible →
+#     ModuleNotFoundError. The flag uses the outer env's torch instead.
 pip install flash-attn==2.6.3 --no-build-isolation
 
 pip install -r requirements.txt                              # everything else
@@ -273,6 +322,14 @@ Verify your balance is decreasing as expected — should be **~$3 spent, not $30
 - **Pod won't start ("out of capacity").** Community Cloud A100s go in-and-out of stock — try **A100 SXM** if PCIe is out, or H100 PCIe (~$2.89/hr) as a faster substitute, or just wait 10–30 min.
 - **SSH connection dropped mid-download.** This is exactly why we started inside `tmux new -s phase0`. Reconnect via SSH, then `tmux attach -t phase0` to resume the session right where you left off. If you forgot to use tmux, the download is dead and needs to restart.
 - **`hf: command not found`** — try `huggingface-cli` (older CLI name). Both ship in the modern `huggingface_hub` package.
+- **`pip install -r requirements.txt` fails on `numpy==1.24.4` with `ModuleNotFoundError: No module named 'distutils.msvccompiler'`** — Python 3.12 removed stdlib `distutils` entirely; numpy 1.24.4 (early 2023) imports from it and has no py312 wheels. Bump the pin:
+  ```bash
+  sed -i 's/^numpy==1\.24\.4/numpy>=1.26.0,<2.0/' requirements.txt
+  pip install -r requirements.txt --no-build-isolation
+  ```
+  1.26 is the first numpy with py312 wheels and is fully API-compatible with Lance's expected 1.24 surface. Stay <2.0 unless you've verified Lance handles numpy 2.x.
+- **`pip install ...` fails on `pkg_resources` / `pkgutil.ImpImporter`** — old setuptools in pip's PEP 517 isolation env can't run on py312. Add `--no-build-isolation` so the outer env's modern setuptools is used.
+- **Generally: requirements.txt pins from Lance assume Python 3.10/3.11.** Other old pinned packages may also fail to build on py312. The pattern when a pin fails: bump it to the first version with a py312 wheel (PyPI's release page shows wheel filenames), keeping the major version unchanged. Common candidates beyond numpy: any package whose `requirements.txt` version is pre-Oct-2023.
 
 ## After the capture
 
