@@ -16,8 +16,12 @@ classifiers = [
 dependencies = [
     "mlx>=0.20.0",
     "mlx-lm>=0.20.0",
-    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git",
-    "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git",
+    # Pinned to known-good commits 2026-05-20 — Qwen2.5-VL mRoPE has been
+    # churning upstream (multiple commits/month). Unpin only after a deliberate
+    # bump-and-validate cycle. See src/lance_mlx/model/lance_llm.py for the
+    # subclass contract we rely on.
+    "mlx-vlm @ git+https://github.com/Blaizzy/mlx-vlm.git@f2e19deccd257814c91a9cc2b5cb47281385cf40",
+    "mlx-video @ git+https://github.com/Blaizzy/mlx-video.git@87db56a51758fefb748a359b90a5283bb8ba4837",
     "huggingface_hub>=0.25.0",
     "requests>=2.31",
     "safetensors>=0.4.5",

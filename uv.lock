@@ -863,8 +863,8 @@ requires-dist = [
     { name = "lpips", marker = "extra == 'dev'", specifier = ">=0.1.4" },
     { name = "mlx", specifier = ">=0.20.0" },
     { name = "mlx-lm", specifier = ">=0.20.0" },
-    { name = "mlx-video", git = "https://github.com/Blaizzy/mlx-video.git" },
-    { name = "mlx-vlm", git = "https://github.com/Blaizzy/mlx-vlm.git" },
+    { name = "mlx-video", git = "https://github.com/Blaizzy/mlx-video.git?rev=87db56a51758fefb748a359b90a5283bb8ba4837" },
+    { name = "mlx-vlm", git = "https://github.com/Blaizzy/mlx-vlm.git?rev=f2e19deccd257814c91a9cc2b5cb47281385cf40" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=10.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -1167,7 +1167,7 @@ wheels = [
 [[package]]
 name = "mlx-video"
 version = "0.0.1"
-source = { git = "https://github.com/Blaizzy/mlx-video.git#87db56a51758fefb748a359b90a5283bb8ba4837" }
+source = { git = "https://github.com/Blaizzy/mlx-video.git?rev=87db56a51758fefb748a359b90a5283bb8ba4837#87db56a51758fefb748a359b90a5283bb8ba4837" }
 dependencies = [
     { name = "ftfy" },
     { name = "huggingface-hub" },
@@ -1188,7 +1188,7 @@ dependencies = [
 [[package]]
 name = "mlx-vlm"
 version = "0.5.0"
-source = { git = "https://github.com/Blaizzy/mlx-vlm.git#f2e19deccd257814c91a9cc2b5cb47281385cf40" }
+source = { git = "https://github.com/Blaizzy/mlx-vlm.git?rev=f2e19deccd257814c91a9cc2b5cb47281385cf40#f2e19deccd257814c91a9cc2b5cb47281385cf40" }
 dependencies = [
     { name = "datasets" },
     { name = "fastapi" },
