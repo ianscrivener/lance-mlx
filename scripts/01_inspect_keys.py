@@ -36,33 +36,58 @@ from safetensors import safe_open
 
 
 # Component classification — prefix → label. Order matters (first match wins).
-# Adjust patterns once empirical key list reveals upstream naming.
+# Patterns reflect the 2026-05-19 verified findings: Lance's GEN expert uses a
+# `_moe_gen` suffix on every attention/MLP/layernorm piece; UND is the bare base
+# Qwen2.5-VL naming. Flow head is one Linear named `llm2vae`. Per-layer QK-norms
+# live under self_attn.{q,k}_norm[/_moe_gen]. MaPE is hardcoded — should not
+# appear in safetensors at all.
 COMPONENT_PATTERNS = [
-    (re.compile(r"^model\.embed_tokens\.|^embed_tokens\."), "embeddings"),
-    (re.compile(r"^lm_head\.|^model\.lm_head\."), "lm_head"),
-    # Per-expert: look for explicit _und / _gen suffixes
-    (re.compile(r".*\.ffn_und\.|.*\.mlp_und\.|.*_und\.gate_proj|.*_und\.up_proj|.*_und\.down_proj"), "ffn_und"),
-    (re.compile(r".*\.ffn_gen\.|.*\.mlp_gen\.|.*_gen\.gate_proj|.*_gen\.up_proj|.*_gen\.down_proj"), "ffn_gen"),
-    (re.compile(r".*\.qk_norm_und\.|.*q_norm_und|.*k_norm_und"), "qk_norm_und"),
-    (re.compile(r".*\.qk_norm_gen\.|.*q_norm_gen|.*k_norm_gen"), "qk_norm_gen"),
-    (re.compile(r".*\.o_proj_und\.|.*self_attn\.o_proj_und"), "o_proj_und"),
-    (re.compile(r".*\.o_proj_gen\.|.*self_attn\.o_proj_gen"), "o_proj_gen"),
-    # Shared attention (QKV, possibly o_proj if not split)
-    (re.compile(r".*\.self_attn\.q_proj\.|.*\.self_attn\.k_proj\.|.*\.self_attn\.v_proj\.|.*\.self_attn\.o_proj\."), "attn_shared"),
+    # Embeddings + LM head — Lance wraps the LLM in `language_model.`
+    (re.compile(r"(^|.*\.)embed_tokens(?:\.|$)"), "embeddings"),
+    (re.compile(r"(^|.*\.)lm_head(?:\.|$)"), "lm_head"),
+
+    # Bundled ViT — Lance_3B_Video bundles the Qwen2.5-VL ViT inside this
+    # safetensors (Lance_3B does NOT). Claim ALL vit_model.* keys here as
+    # one component, otherwise the ViT's mlp/norms leak into mlp_und/norm.
+    (re.compile(r"^vit_model\.|^visual\.|^vit\.|^model\.visual\."), "vit"),
+
+    # Lance GEN-expert keys — `_moe_gen` suffix. MUST match before base patterns.
+    (re.compile(r".*\.q_proj_moe_gen\.|.*\.k_proj_moe_gen\.|.*\.v_proj_moe_gen\.|.*\.o_proj_moe_gen\."), "attn_moe_gen"),
+    (re.compile(r".*\.q_norm_moe_gen(?:\.|$)|.*\.k_norm_moe_gen(?:\.|$)"), "qk_norm_moe_gen"),
+    (re.compile(r".*\.mlp_moe_gen\."), "mlp_moe_gen"),
+    (re.compile(r".*\.input_layernorm_moe_gen(?:\.|$)|.*\.post_attention_layernorm_moe_gen(?:\.|$)"), "layernorm_moe_gen"),
+    # Final RMSNorm has a GEN sibling too (`norm_moe_gen`) — verified 2026-05-20.
+    (re.compile(r"(^|.*\.)norm_moe_gen(?:\.|$)"), "final_norm_moe_gen"),
+
+    # Lance flow head — LLM hidden → VAE velocity, named `llm2vae`.
+    # NOTE: actual safetensors has both weight and bias (HANDOFF said bias=False; that was wrong).
+    (re.compile(r"^llm2vae(?:\.|$)|.*\.llm2vae(?:\.|$)"), "flow_head"),
+    # Symmetric input projection — VAE latent → LLM hidden, named `vae2llm`.
+    # Verified 2026-05-20: NOT in original scaffolds.
+    (re.compile(r"^vae2llm(?:\.|$)|.*\.vae2llm(?:\.|$)"), "vae_in_proj"),
+    # Learned positional embedding over VAE latents (max_latent_size × max_latent_size grid).
+    # Verified 2026-05-20: NOT in original scaffolds.
+    (re.compile(r"^latent_pos_embed(?:\.|$)|.*\.latent_pos_embed(?:\.|$)"), "latent_pos_embed"),
+    # Lance timestep embedder. Verified prefix: `time_embedder.mlp.{0,2}` (Sequential).
+    (re.compile(r"(^|.*\.)time_embedder(?:\.|$)|(^|.*\.)t_embedder(?:\.|$)|(^|.*\.)time_embed(?:\.|$)"), "timestep_embedder"),
+
+    # Base Qwen2.5-VL keys = Lance UND expert (no suffix at all).
+    (re.compile(r".*\.self_attn\.q_proj\.|.*\.self_attn\.k_proj\.|.*\.self_attn\.v_proj\.|.*\.self_attn\.o_proj\."), "attn_und"),
+    (re.compile(r".*\.self_attn\.q_norm(?:\.|$)|.*\.self_attn\.k_norm(?:\.|$)"), "qk_norm_und"),
+    (re.compile(r".*\.mlp\.gate_proj\.|.*\.mlp\.up_proj\.|.*\.mlp\.down_proj\."), "mlp_und"),
+    (re.compile(r".*\.input_layernorm(?:\.|$)|.*\.post_attention_layernorm(?:\.|$)"), "layernorm_und"),
     (re.compile(r".*\.self_attn\."), "attn_other"),
-    # VAE — may be bundled or separate file
+
+    # VAE — bundled separately as Wan2.2_VAE.pth; usually absent from LLM safetensors.
     (re.compile(r"^vae\.|^model\.vae\."), "vae"),
-    # ViT
-    (re.compile(r"^visual\.|^vit\.|^model\.visual\."), "vit"),
-    # Flow head
-    (re.compile(r"^flow_head\.|^velocity_head\.|^gen_head\."), "flow_head"),
-    # MaPE
+    # MaPE — verified hardcoded; should be ABSENT. Pattern here only catches surprises.
     (re.compile(r"^mape\.|^model\.mape_offsets|.*delta_m"), "mape"),
-    # Connectors
-    (re.compile(r"^connector\.|.*\.connector\."), "connector"),
-    # Norms (catch-all after per-expert)
-    (re.compile(r".*\.input_layernorm\.|.*\.post_attention_layernorm\.|.*\.norm\."), "norm"),
-    (re.compile(r"^model\.norm\.|^final_norm\."), "final_norm"),
+    # Connectors / multimodal projectors
+    (re.compile(r"^connector\.|.*\.connector\.|^mm_projector\."), "connector"),
+
+    # Final norm (UND side; GEN side handled above) + catch-all per-layer norms
+    (re.compile(r"(^|.*\.)model\.norm(?:\.|$)|^final_norm(?:\.|$)"), "final_norm"),
+    (re.compile(r".*\.norm(?:\.|$)"), "norm"),
 ]
 
 
@@ -97,34 +122,79 @@ def analyze_q2_lm_head(shapes: dict[str, list[int]]) -> dict:
 
 
 def analyze_q3_flow_head(by_component: dict[str, list[str]], shapes: dict[str, list[int]]) -> dict:
-    """Q3: What's the flow head structure?"""
+    """Q3: What's the flow head structure?
+
+    Verified 2026-05-19 (HANDOFF) said: single `nn.Linear(hidden_size, 48)` named
+    `llm2vae`, `bias=False`. Empirical (2026-05-20) finding: weight AND bias are
+    both present — the verified spec's `bias=False` claim was wrong (or the
+    upstream code has `bias=True` overriding the docstring read). Scaffold must
+    set `bias=True`.
+    """
     fh_keys = by_component.get("flow_head", [])
     if not fh_keys:
         return {"q3_verdict": "UNKNOWN",
-                "next_step": "Run script with --verbose to grep all keys for 'velocity', 'flow', 'gen_head'"}
+                "next_step": "Grep full dump for 'velocity', 'flow', 'gen_head', 'llm2vae'"}
     fh_shapes = {k: shapes[k] for k in fh_keys}
-    n_keys = len(fh_keys)
-    if n_keys <= 2:
-        return {"q3_verdict": "LINEAR_PROJECTION", "shapes": fh_shapes, "n_keys": n_keys}
-    if n_keys <= 6:
-        return {"q3_verdict": "MLP", "shapes": fh_shapes, "n_keys": n_keys}
-    return {"q3_verdict": "DIT_BLOCK_OR_LARGER", "shapes": fh_shapes, "n_keys": n_keys,
-            "next_step": "Inspect key names for AdaLN / time_embed / cross_attn signatures"}
+    keys_set = {k.split(".")[-1] for k in fh_keys}
+    has_weight = any("llm2vae" in k and shapes[k][0] == 48 and len(shapes[k]) == 2 for k in fh_keys)
+    if len(fh_keys) == 2 and keys_set == {"weight", "bias"} and has_weight:
+        return {"q3_verdict": "SINGLE_LINEAR_48_WITH_BIAS",
+                "shapes": fh_shapes,
+                "evidence": "llm2vae has both weight and bias — scaffold should use bias=True",
+                "next_step": "Update flow_head.py: nn.Linear(hidden, 48, bias=True)"}
+    if len(fh_keys) == 1:
+        k = fh_keys[0]
+        shape = shapes[k]
+        if "llm2vae" in k and len(shape) == 2 and shape[0] == 48:
+            return {"q3_verdict": "VERIFIED_SINGLE_LINEAR_48_BIAS_FALSE",
+                    "shape": shape,
+                    "evidence": f"{k} shape={shape}, no bias"}
+        return {"q3_verdict": "SINGLE_TENSOR_UNEXPECTED",
+                "shape": shape,
+                "next_step": "Verified flow head should be llm2vae shape=[48, hidden]. Investigate."}
+    return {"q3_verdict": "MULTI_TENSOR_UNEXPECTED",
+            "n_keys": len(fh_keys),
+            "shapes": fh_shapes,
+            "next_step": "Flow head was verified to be ONE Linear; >2-tensor here means the scaffold is wrong"}
 
 
 def analyze_q4_attn(by_component: dict[str, list[str]]) -> dict:
-    """Q4: Are attention QKV projections shared or duplicated?"""
-    shared_attn = by_component.get("attn_shared", [])
-    o_und = by_component.get("o_proj_und", [])
-    o_gen = by_component.get("o_proj_gen", [])
-    if shared_attn and not o_und and not o_gen:
-        return {"q4_verdict": "FULLY_SHARED",
-                "evidence": f"{len(shared_attn)} shared attn keys, no per-expert o_proj"}
-    if o_und and o_gen:
-        return {"q4_verdict": "QKV_SHARED_OPROJ_SPLIT",
-                "evidence": f"{len(o_und)} o_proj_und + {len(o_gen)} o_proj_gen"}
+    """Q4: Are attention QKV projections shared or duplicated?
+
+    Verified 2026-05-19 + 2026-05-20: DUPLICATED. UND keeps the bare
+    Qwen2.5-VL naming (`{q,k,v,o}_proj`); GEN adds `_moe_gen` siblings.
+
+    Per-layer count: 7 attention tensors per expert per layer — 4 weights
+    (q/k/v/o) + 3 biases (q/k/v; o_proj has no bias in Qwen2.5-VL). Times
+    36 layers = 252 per side.
+    """
+    und = by_component.get("attn_und", [])
+    gen = by_component.get("attn_moe_gen", [])
+    n_layers_guess = 36
+    expected_per_layer = 7   # 4 weights (q,k,v,o) + 3 biases (q,k,v); o_proj has no bias
+    expected_total = n_layers_guess * expected_per_layer
+
+    if und and gen:
+        und_ok = (len(und) == expected_total)
+        gen_ok = (len(gen) == expected_total)
+        if und_ok and gen_ok:
+            return {"q4_verdict": "DUPLICATED_MOE_GEN_VERIFIED",
+                    "und_count": len(und),
+                    "gen_count": len(gen),
+                    "evidence": f"{len(und)} UND + {len(gen)} GEN attn keys = 36 layers × 7 tensors (4 weights + 3 biases) per side",
+                    "next_step": "Confirm shape symmetry between matching (und, _moe_gen) pairs in convert.py"}
+        return {"q4_verdict": "DUPLICATED_MOE_GEN_COUNT_DRIFT",
+                "und_count": len(und),
+                "gen_count": len(gen),
+                "expected_per_side": expected_total,
+                "next_step": f"Expected {expected_total} per side; investigate the delta"}
+    if und and not gen:
+        return {"q4_verdict": "UND_ONLY_NO_GEN_FOUND",
+                "und_count": len(und),
+                "evidence": "0 _moe_gen attention keys — either wrong checkpoint or different naming",
+                "next_step": "Grep full dump for 'moe', 'gen', '_expert', or check Lance_3B vs Lance_3B_Video file"}
     return {"q4_verdict": "AMBIGUOUS",
-            "shared_count": len(shared_attn), "und_count": len(o_und), "gen_count": len(o_gen),
+            "und_count": len(und), "gen_count": len(gen),
             "next_step": "Manually inspect a few attention layer keys"}
 
 
@@ -142,14 +212,24 @@ def analyze_q5_position_groups(by_component: dict[str, list[str]], shapes: dict[
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--checkpoint", type=Path, required=True,
-                        help="Path to model.safetensors (e.g. ~/models/Lance/Lance_3B/model.safetensors)")
+    parser.add_argument("--checkpoint", type=Path, default=None,
+                        help="Path to a LOCAL model.safetensors")
+    parser.add_argument("--remote-repo", default=None,
+                        help="HuggingFace repo_id (e.g. bytedance-research/Lance) for REMOTE header-only mode")
+    parser.add_argument("--remote-file", default=None,
+                        help="Filename within --remote-repo (e.g. Lance_3B/model.safetensors)")
     parser.add_argument("--notes-dir", type=Path, default=Path("notes"))
     parser.add_argument("--name", default="lance")
     parser.add_argument("--verbose", action="store_true", help="Dump unclassified keys")
     args = parser.parse_args()
 
-    if not args.checkpoint.exists():
+    if args.checkpoint is None and not (args.remote_repo and args.remote_file):
+        print("ERROR: provide --checkpoint OR (--remote-repo + --remote-file)", file=sys.stderr)
+        return 1
+    if args.checkpoint and (args.remote_repo or args.remote_file):
+        print("ERROR: --checkpoint is mutually exclusive with --remote-*", file=sys.stderr)
+        return 1
+    if args.checkpoint and not args.checkpoint.exists():
         print(f"ERROR: {args.checkpoint} not found", file=sys.stderr)
         return 1
 
@@ -163,21 +243,43 @@ def main() -> int:
     dtypes: Counter[str] = Counter()
     total_params = 0
 
-    with safe_open(str(args.checkpoint), framework="numpy") as f, full_txt.open("w") as out:
-        keys = list(f.keys())
-        out.write(f"# {args.checkpoint}\n# {len(keys)} tensors\n\n")
-        for key in keys:
-            slice_ = f.get_slice(key)
-            shape = slice_.get_shape()
-            dtype = str(slice_.get_dtype())
-            numel = 1
-            for d in shape:
-                numel *= d
-            total_params += numel
-            dtypes[dtype] += 1
-            shapes[key] = shape
-            by_component[classify(key)].append(key)
-            out.write(f"{key}\t{shape}\t{dtype}\t{numel:,}\n")
+    if args.checkpoint:
+        source_label = str(args.checkpoint)
+        with safe_open(str(args.checkpoint), framework="numpy") as f, full_txt.open("w") as out:
+            keys = list(f.keys())
+            out.write(f"# {source_label}\n# {len(keys)} tensors\n\n")
+            for key in keys:
+                slice_ = f.get_slice(key)
+                shape = list(slice_.get_shape())
+                dtype = str(slice_.get_dtype())
+                numel = 1
+                for d in shape:
+                    numel *= d
+                total_params += numel
+                dtypes[dtype] += 1
+                shapes[key] = shape
+                by_component[classify(key)].append(key)
+                out.write(f"{key}\t{shape}\t{dtype}\t{numel:,}\n")
+    else:
+        from huggingface_hub import parse_safetensors_file_metadata
+        source_label = f"hf://{args.remote_repo}/{args.remote_file}"
+        print(f"Fetching safetensors header (header-only, ~KB) from {source_label} ...", file=sys.stderr)
+        md = parse_safetensors_file_metadata(repo_id=args.remote_repo, filename=args.remote_file)
+        with full_txt.open("w") as out:
+            keys = list(md.tensors.keys())
+            out.write(f"# {source_label}\n# {len(keys)} tensors (header-only)\n\n")
+            for key in keys:
+                ti = md.tensors[key]
+                shape = list(ti.shape)
+                dtype = str(ti.dtype)
+                numel = 1
+                for d in shape:
+                    numel *= d
+                total_params += numel
+                dtypes[dtype] += 1
+                shapes[key] = shape
+                by_component[classify(key)].append(key)
+                out.write(f"{key}\t{shape}\t{dtype}\t{numel:,}\n")
 
     # Resolve the five open questions
     q1 = analyze_q1_mape(by_component, shapes)
@@ -189,7 +291,7 @@ def main() -> int:
     # Component breakdown summary
     with summary_md.open("w") as out:
         out.write(f"# {args.name} — key topology summary\n\n")
-        out.write(f"- Checkpoint: `{args.checkpoint.name}`\n")
+        out.write(f"- Source: `{source_label}`\n")
         out.write(f"- Total tensors: **{len(shapes)}**\n")
         out.write(f"- Total parameters: **{total_params / 1e9:.2f} B**\n")
         out.write(f"- Dtypes: {', '.join(f'{d}={n}' for d, n in dtypes.most_common())}\n\n")

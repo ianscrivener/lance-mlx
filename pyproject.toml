@@ -45,6 +45,10 @@ Paper = "https://arxiv.org/abs/2605.18678"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+# Required because two deps use git+https direct references (mlx-vlm, mlx-video).
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/lance_mlx"]
 
