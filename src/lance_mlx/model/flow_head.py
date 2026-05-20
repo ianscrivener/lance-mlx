@@ -42,8 +42,16 @@ DEFAULT_TIMESTEP_SHIFT = 3.5           # `--validation_timestep_shift 3.5`
 DEFAULT_CFG_TEXT_SCALE = 4.0           # `--cfg_text_scale 4.0`
 
 
-class FlowHead(nn.Module):
+class FlowHead(nn.Linear):
     """One Linear from LLM_GEN hidden state to flow-matching velocity.
+
+    `FlowHead` IS a `nn.Linear` (subclass), not a wrapper around one. This
+    matters for safetensors key naming: when LanceModel attaches `self.llm2vae
+    = FlowHead(...)`, the param tree keys come out as `llm2vae.weight` and
+    `llm2vae.bias` — matching exactly what `scripts/02_convert.py` produces
+    for the upstream `llm2vae.{weight,bias}` tensors. A wrapper-style class
+    with `self.llm2vae = nn.Linear(...)` would have introduced a spurious
+    extra nesting (`llm2vae.llm2vae.weight`) and broken load-from-safetensors.
 
     Mirrors upstream `self.llm2vae = nn.Linear(hidden_size, patch_latent_dim)`
     where `patch_latent_dim = 48` under the shipped config.
@@ -55,18 +63,7 @@ class FlowHead(nn.Module):
 
     def __init__(self, hidden_size: int = DEFAULT_HIDDEN_SIZE,
                  latent_channels: int = DEFAULT_LATENT_CHANNELS):
-        super().__init__()
-        self.llm2vae = nn.Linear(hidden_size, latent_channels, bias=True)
-
-    def __call__(self, h: mx.array) -> mx.array:
-        """
-        Args:
-            h: (B, T_noisy, hidden_size) — LLM hidden states at noisy-VAE positions.
-
-        Returns:
-            (B, T_noisy, latent_channels) velocity prediction.
-        """
-        return self.llm2vae(h)
+        super().__init__(hidden_size, latent_channels, bias=True)
 
 
 def euler_step(x_t: mx.array, v_t: mx.array, dt: float) -> mx.array:

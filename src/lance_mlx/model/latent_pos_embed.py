@@ -36,34 +36,46 @@ from __future__ import annotations
 import mlx.core as mx
 import mlx.nn as nn
 
-DEFAULT_MAX_LATENT_SIZE = 64
+DEFAULT_NUM_POSITIONS = 4096        # 64×64 spatial grid (image variant)
 DEFAULT_HIDDEN_SIZE = 2048
+
+# Empirical sizes captured from the converted checkpoints (Phase 1b):
+#   Lance_3B (image):       4096   = 64 × 64        spatial only
+#   Lance_3B_Video:       126976   = 64 × 64 × 31   spatial × temporal slots
+# The table is a flat list of positions; the caller flattens 2D or 3D grid
+# coordinates into a single index before lookup.
 
 
 class LatentPosEmbed(nn.Module):
-    """Learned `(max_latent_size² × hidden_size)` positional embedding table.
+    """Learned `(num_positions, hidden_size)` positional embedding table.
 
     Loaded from `latent_pos_embed.pos_embed`. Indexed by flat latent-grid
     position; broadcast/added into the hidden-state stream at clean/noisy-VAE
     token positions.
+
+    The number of positions is variant-specific (4096 for Lance_3B,
+    126976 for Lance_3B_Video) so the constructor takes it as a parameter.
+    On load from a converted safetensors, the parameter will be overwritten
+    with the actual checkpoint tensor — the initial `num_positions` only
+    affects the shape of the freshly-initialized buffer.
     """
 
-    def __init__(self, max_latent_size: int = DEFAULT_MAX_LATENT_SIZE,
+    def __init__(self, num_positions: int = DEFAULT_NUM_POSITIONS,
                  hidden_size: int = DEFAULT_HIDDEN_SIZE):
         super().__init__()
-        self.max_latent_size = max_latent_size
+        self.num_positions = num_positions
         self.hidden_size = hidden_size
-        # Single nn.Embedding-equivalent. Using Embedding gets us free
-        # indexing semantics; the saved tensor key will be `pos_embed.weight`
-        # — DIFFERENT from the safetensors key `pos_embed`. Use a raw
-        # parameter instead to match the safetensors key exactly.
-        self.pos_embed = mx.zeros((max_latent_size * max_latent_size, hidden_size))
+        # Raw mx.array parameter so the safetensors key is exactly
+        # `latent_pos_embed.pos_embed` (no `.weight` suffix that nn.Embedding
+        # would add). MLX tracks mx.array attributes as parameters.
+        self.pos_embed = mx.zeros((num_positions, hidden_size))
 
     def __call__(self, positions: mx.array) -> mx.array:
         """
         Args:
-            positions: (B, T_vae) int — flat indices into the latent grid
-                (row * max_latent_size + col for 2D positions).
+            positions: (B, T_vae) int — flat indices into the latent grid.
+                For images: row * 64 + col. For video: temporal * 4096 + row * 64 + col
+                (caller computes the right flat layout).
 
         Returns:
             (B, T_vae, hidden_size) — positional embeddings to be ADDED into

@@ -27,8 +27,9 @@ def test_flow_head_default_dims():
     """FlowHead defaults: Linear(2048, 48, bias=True). Verified against
     Lance_3B safetensors `llm2vae.weight [48, 2048]` + `llm2vae.bias [48]`."""
     fh = FlowHead()
-    assert fh.llm2vae.weight.shape == (48, 2048)
-    assert fh.llm2vae.bias.shape == (48,)
+    # FlowHead IS-A nn.Linear, so .weight/.bias are direct attributes.
+    assert fh.weight.shape == (48, 2048)
+    assert fh.bias.shape == (48,)
 
 
 def test_flow_head_forward_shape():
@@ -44,7 +45,7 @@ def test_flow_head_bias_is_true():
     actual safetensors has both weight AND bias. If this fails, someone
     reverted D1 without reading the empirical evidence."""
     fh = FlowHead()
-    assert fh.llm2vae.bias is not None, (
+    assert fh.bias is not None, (
         "llm2vae must have a bias — see notes/phase1a_keys.md D1"
     )
 
@@ -98,9 +99,17 @@ def test_latent_pos_embed_lookup_shape():
 
 
 def test_latent_pos_embed_custom_size():
-    """Smaller grids should also work — useful for tests that don't need 64x64."""
-    lpe = LatentPosEmbed(max_latent_size=8, hidden_size=64)
+    """Smaller tables should also work — useful for tests that don't need 64x64.
+    Also confirms the constructor accepts arbitrary (non-square) num_positions,
+    needed for the Lance_3B_Video variant (126976 = 4096 × 31)."""
+    lpe = LatentPosEmbed(num_positions=64, hidden_size=64)
     assert lpe.pos_embed.shape == (64, 64)
+
+
+def test_latent_pos_embed_video_size():
+    """Confirms the constructor handles the Lance_3B_Video size (126976)."""
+    lpe = LatentPosEmbed(num_positions=126976, hidden_size=2048)
+    assert lpe.pos_embed.shape == (126976, 2048)
 
 
 # -------------------- TimestepEmbedder (existing, smoke) ------------------
