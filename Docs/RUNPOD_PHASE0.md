@@ -104,7 +104,14 @@ export HF_HUB_ENABLE_HF_TRANSFER=1                           # ~5× faster downl
 git clone https://github.com/bytedance/Lance.git
 cd Lance
 pip install -U pip
-pip install -r requirements.txt                              # flash-attn, triton, etc.
+
+# flash-attn first, with --no-build-isolation. Its setup.py imports torch at build
+# time to read CUDA arch info, but pip's default PEP 517 build isolation runs setup.py
+# in a fresh venv where torch isn't visible → ModuleNotFoundError: No module named 'torch'.
+# --no-build-isolation tells pip to use the outer env (where torch IS installed).
+pip install flash-attn==2.6.3 --no-build-isolation
+
+pip install -r requirements.txt                              # everything else
 pip install -U "huggingface_hub[hf_transfer]"
 ```
 
@@ -123,8 +130,15 @@ hf download bytedance-research/Lance \
   --include "Lance_3B_Video/*" \
   --include "Wan2.2_VAE.pth" \
   --include "Qwen2.5-VL-ViT/*" \
-  --include "LICENSE" "README.md" \
+  --include "LICENSE" \
+  --include "README.md" \
   --local-dir downloads
+
+# ⚠ One `--include` per pattern — don't pass multiple values to a single
+# --include flag. The hf 1.x CLI parser treats trailing positional args as
+# explicit FILENAME selectors, which then OVERRIDES every --include you set.
+# Symptom if you get this wrong: a warning "Ignoring --include since filenames
+# have being explicitly set" followed by only one file downloading.
 ```
 
 Expected output:
@@ -253,7 +267,7 @@ Verify your balance is decreasing as expected — should be **~$3 spent, not $30
 
 ## Troubleshooting
 
-- **`flash-attn` install fails.** Compiles against your CUDA version; the RunPod PyTorch 2.8 / CUDA 12.8 template normally just works. If it doesn't: `pip install flash-attn==2.6.3 --no-build-isolation`.
+- **`flash-attn` install fails with `ModuleNotFoundError: No module named 'torch'`.** Run `pip install flash-attn==2.6.3 --no-build-isolation` (this is now also the proactive path in §3). flash-attn's setup.py imports torch at build time but pip's default build isolation hides torch from the build env; the flag uses the outer env instead.
 - **HF download stalls or is slow.** Confirm `echo $HF_TOKEN` and `echo $HF_HUB_ENABLE_HF_TRANSFER` both show values. Without auth + hf_transfer you're rate-limited and looking at hours instead of minutes.
 - **OOM during `t2v`.** A100 80GB should be enough at 50 frames / 480p; if you see OOM, drop `NUM_FRAMES=` to 30 in the script first to validate the pipeline, then increase.
 - **Pod won't start ("out of capacity").** Community Cloud A100s go in-and-out of stock — try **A100 SXM** if PCIe is out, or H100 PCIe (~$2.89/hr) as a faster substitute, or just wait 10–30 min.
