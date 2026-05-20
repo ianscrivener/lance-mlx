@@ -28,11 +28,23 @@ Usage:
         --dry-run
 
     # Real conversion (downloads ~24-28 GB):
+    HF_HUB_DISABLE_XET=1 \\
     uv run python scripts/02_convert.py \\
         --hf-repo bytedance-research/Lance \\
         --variant lance_3b \\
         --output ~/models/mlx/Lance-3B-bf16 \\
         --dtype bf16
+
+KNOWN ISSUE — HuggingFace Xet backend flakiness (2026-05-20):
+huggingface_hub 1.x defaults to Xet for downloads, but Xet's writer
+crashes intermittently on macOS APFS with errors like:
+
+    RuntimeError: Internal error: Background writer channel closed
+    OSError: I/O error: IO Error: Invalid argument (os error 22)
+
+Workaround: set `HF_HUB_DISABLE_XET=1` to force classic HTTP downloads.
+Xet's deprecated predecessor `HF_HUB_ENABLE_HF_TRANSFER` no longer works
+in hf_hub 1.x — the warning is correct, hf_transfer is now a no-op.
 """
 
 from __future__ import annotations

@@ -27,6 +27,7 @@ dependencies = [
     "imageio-ffmpeg>=0.5.1",
     "tqdm>=4.66",
     "tokenizers>=0.20",
+    "hf-transfer>=0.1.9",
 ]
 
 [project.optional-dependencies]
