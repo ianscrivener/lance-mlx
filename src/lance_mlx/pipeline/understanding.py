@@ -277,27 +277,11 @@ class UnderstandingPipeline:
         # 151643 (<|endoftext|>) as stop tokens. Honor both.
         eos_token_ids = [im_end_id, endoftext_id]
 
-        # 2. LanceModel from converter output.
+        # 2. LanceModel from converter output (quantization-aware).
+        from lance_mlx.model._loader import build_text_config, load_lance_model
         cfg = json.loads((lance_weights_dir / "config.json").read_text())
-        text_cfg = TextConfig(
-            model_type=cfg["model_type"],
-            hidden_size=cfg["hidden_size"],
-            num_hidden_layers=cfg["num_hidden_layers"],
-            intermediate_size=cfg["intermediate_size"],
-            num_attention_heads=cfg["num_attention_heads"],
-            rms_norm_eps=cfg["rms_norm_eps"],
-            vocab_size=cfg["vocab_size"],
-            num_key_value_heads=cfg.get("num_key_value_heads"),
-            max_position_embeddings=cfg.get("max_position_embeddings", 128000),
-            rope_theta=cfg.get("rope_theta", 1e6),
-            rope_scaling=cfg.get("rope_scaling"),
-            tie_word_embeddings=cfg.get("tie_word_embeddings", False),
-        )
-        saved_lance = mx.load(str(lance_weights_dir / "model.safetensors"))
-        num_latent_positions = saved_lance["latent_pos_embed.pos_embed"].shape[0]
-        lance_model = LanceModel(text_cfg, num_latent_positions=num_latent_positions)
-        lance_model.load_weights(list(saved_lance.items()))
-        mx.eval(lance_model.parameters())
+        text_cfg = build_text_config(cfg)
+        lance_model = load_lance_model(lance_weights_dir)
 
         # 3. VisionModel from local vit.safetensors. mlx-vlm's `sanitize()`
         #    handles the patch_embed.proj.weight 5D transpose.
