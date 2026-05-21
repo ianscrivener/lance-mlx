@@ -10,9 +10,10 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 
 | Repo | Status | Use for |
 |---|---|---|
-| [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` |
+| [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` (full quality, ~15 GB) |
+| [`mlx-community/Lance-3B-8bit`](https://huggingface.co/mlx-community/Lance-3B-8bit) | 🟢 Production | Same as above, **2.7× faster, 16 GB Mac-friendly** (~9 GB) |
 | [`mlx-community/Wan2.2-VAE-Lance-bf16`](https://huggingface.co/mlx-community/Wan2.2-VAE-Lance-bf16) | 🟢 Production | 48-ch Wan2.2 VAE (standalone, shared by image + video pipelines) |
-| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Functional | `t2v` (painterly aesthetic by design), `x2t_video` + `video_edit` (implemented, validation pending) |
+| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Functional | `t2v` (painterly aesthetic by design), `x2t_video`, `video_edit` |
 
 ## Status
 

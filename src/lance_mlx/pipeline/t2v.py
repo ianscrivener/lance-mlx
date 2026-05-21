@@ -109,30 +109,19 @@ class TextToVideoPipeline:
 
         # LanceModel (must be Lance_3B_Video for video generation — the
         # latent_pos_embed table needs 126976 entries for temporal coverage).
+        # Quantization-aware loader applies nn.quantize if config says so.
+        from lance_mlx.model._loader import build_text_config, load_lance_model
         cfg = json.loads((lance_weights_dir / "config.json").read_text())
-        text_cfg = TextConfig(
-            model_type=cfg["model_type"],
-            hidden_size=cfg["hidden_size"],
-            num_hidden_layers=cfg["num_hidden_layers"],
-            intermediate_size=cfg["intermediate_size"],
-            num_attention_heads=cfg["num_attention_heads"],
-            rms_norm_eps=cfg["rms_norm_eps"],
-            vocab_size=cfg["vocab_size"],
-            num_key_value_heads=cfg.get("num_key_value_heads"),
-            max_position_embeddings=cfg.get("max_position_embeddings", 128000),
-            rope_theta=cfg.get("rope_theta", 1e6),
-            rope_scaling=cfg.get("rope_scaling"),
-            tie_word_embeddings=cfg.get("tie_word_embeddings", False),
-        )
-        saved_lance = mx.load(str(lance_weights_dir / "model.safetensors"))
-        num_latent_positions = saved_lance["latent_pos_embed.pos_embed"].shape[0]
+        text_cfg = build_text_config(cfg)
+        # Peek at latent_pos_embed shape for the warning, then load.
+        _saved_peek = mx.load(str(lance_weights_dir / "model.safetensors"))
+        num_latent_positions = _saved_peek["latent_pos_embed.pos_embed"].shape[0]
+        del _saved_peek
         if num_latent_positions != MAX_NUM_LATENT_POSITIONS:
             print(f"WARNING: latent_pos_embed has {num_latent_positions} entries; "
                   f"video pipeline expects {MAX_NUM_LATENT_POSITIONS} (= 31×64×64). "
                   f"Are you using Lance_3B_Video weights?")
-        lance_model = LanceModel(text_cfg, num_latent_positions=num_latent_positions)
-        lance_model.load_weights(list(saved_lance.items()))
-        mx.eval(lance_model.parameters())
+        lance_model = load_lance_model(lance_weights_dir)
 
         vae_decoder = Wan22VAEDecoder(z_dim=VAE_LATENT_CHANNELS, dim=160, dec_dim=256)
         saved_vae = mx.load(str(vae_safetensors))
