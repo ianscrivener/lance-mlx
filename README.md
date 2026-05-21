@@ -6,6 +6,8 @@ MLX port of **Lance** for Apple Silicon. Lance is a 3B-active / ~12B-total param
 
 ## 📦 Weights on Hugging Face (`mlx-community`)
 
+All three repos live in the **[Lance MLX collection](https://huggingface.co/collections/mlx-community/lance-mlx-6a0f3cd5648a74f8283fc8a4)** for one-click browsing.
+
 | Repo | Status | Use for |
 |---|---|---|
 | [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` |
