@@ -12,11 +12,11 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 |---|---|---|
 | [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` |
 | [`mlx-community/Wan2.2-VAE-Lance-bf16`](https://huggingface.co/mlx-community/Wan2.2-VAE-Lance-bf16) | 🟢 Production | 48-ch Wan2.2 VAE (standalone, shared by image + video pipelines) |
-| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🚧 Alpha | `t2v` (small scale), `x2t_video`, `video_edit` — see [issue #1](https://github.com/xocialize/lance-mlx/issues/1) |
+| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Functional | `t2v` (painterly aesthetic by design), `x2t_video` + `video_edit` (implemented, validation pending) |
 
 ## Status
 
-🟢 **Image MVP shipped — t2i, image_edit, x2t_image all production-quality on Apple Silicon as of 2026-05-21. Video pipelines functional at small scale; large-scale t2v under active investigation.**
+🟢 **Image MVP shipped — t2i, image_edit, x2t_image all production-quality on Apple Silicon as of 2026-05-21. Video t2v functional across the scale envelope (painterly aesthetic by design); x2t_video + video_edit implemented, oracle validation pending.**
 
 | Capability | Status |
 |---|---|
@@ -26,8 +26,8 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 | KV cache for fast autoregressive decode | ✅ 1.7×–2.8× speedup on long generations |
 | **t2i (text → image generation)** | **✅ Production. Photorealistic, prompt-aligned output.** |
 | **image_edit (instruction-based)** | **✅ Production. "Remove hat" preserves identity + style + signature; "Add pearl necklace" leaves rest intact.** |
-| **t2v (text → video, small scale)** | **✅ MVP working at 256×256×16f, 512×512×16f, 768×768×≤13f.** |
-| t2v at large scale (n_lat ≥ ~11.5k) | 🚧 Collapses to noise; [issue #1](https://github.com/xocialize/lance-mlx/issues/1) |
+| **t2v (text → video)** | **✅ Functional across the scale envelope. 17f and 25f at 768² both produce recognizable, prompt-aligned painterly content. [Issue #1](https://github.com/xocialize/lance-mlx/issues/1) closed as prompt-content misinterpretation.** |
+| t2v at very high frame counts (≥49f at 768²) | ⚠️ Functional but ~2¼ hr/clip — impractical without KV cache (Phase 5b) |
 | x2t_video (video VQA) | 🟡 Implemented, not yet validated against oracle |
 | video_edit | 🟡 Implemented, not yet validated end-to-end |
 | 8-bit + 4-bit quants + HF community variants | ⏳ Phase 5b |
