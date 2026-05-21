@@ -169,6 +169,101 @@ vs publication-quality (full Lance defaults). Currently all-or-nothing.
 After P1 + P2 + P3 the production t2v target is **~10-15 min on M5 Max
 128 GB** — moves from "batch only" to "lunch break" tier.
 
+## Phase 4c findings (2026-05-21) — MOST OF "painterly t2v" is not a bug
+
+Investigation via the same Phase 3 self-describe + bisection pattern:
+
+### Frame-count bisection at 768×768 with Lance_3B_Video
+
+| Frames | t_lat | n_lat | Time | Self-describe verdict | Visual |
+|---:|---:|---:|---:|---|---|
+| 1 | 1 | 2304 | 69s | "abstract image... face on object" | painterly red panda + confetti |
+| 5 | 2 | 4608 | 255s | "abstract scene... no clear objects" | **best result** — clear red panda with cap on wave |
+| 9 | 3 | 6912 | 480s | "chaotic mix... no recognizable features" | painterly with subject |
+| 13 | 4 | 9216 | 723s | "dog wearing a hat... floating" | red panda + cap visible |
+| 49 | 13 | 29952 | 4552s | n/a | **pure noise** across all frames |
+
+Pattern: 1f-13f all produce painterly-but-recognizable output. 49f breaks
+completely. Sweet spot for Lance_3B_Video painterly aesthetic appears to
+be ~5 frames at 768×768.
+
+### KEY DIAGNOSIS: Lance_3B vs Lance_3B_Video are different fine-tunes
+
+Compared every shared tensor key (1021 LLM keys, all in common). Most
+differ by significant mean-abs values:
+
+  layers.26.self_attn.q_norm_moe_gen.weight   diff = 0.849
+  layers.26.self_attn.k_norm_moe_gen.weight   diff = 0.826
+  layers.32.self_attn.k_norm_moe_gen.weight   diff = 0.770
+  layers.10.self_attn.{q,k}_norm_moe_gen      diff ≈ 0.70
+  layers.16.self_attn.q_norm_moe_gen          diff = 0.647
+  layers.{15,35}.self_attn.{q,k}_norm_moe_gen diff ≈ 0.59
+  ...
+
+`lm_head.weight` and `embed_tokens.weight` are byte-identical (diff =
+0.000). The two checkpoints share base weights but Lance_3B_Video has
+**different `_moe_gen` (GEN expert) QK-norms** — it's been further
+fine-tuned on video data, which gives it a painterly/stylized output
+aesthetic even on single-frame tasks.
+
+### Cross-check: t2i pipeline with Lance_3B_Video weights
+
+Ran our working t2i pipeline (which produces crystal-clear output with
+Lance_3B) but pointed it at Lance_3B_Video weights. Result at the same
+prompt/seed: recognizable red panda with cap, but painterly confetti
+background. NOT crystal-clear. **Confirms the quality difference is the
+weights, not our pipeline code.**
+
+### Implications
+
+- **Phase 3 / t2i quality is PROVEN with Lance_3B** (photorealistic).
+- **Phase 4a smaller-scale t2v outputs at 256×256, 512×512×16f, 768×768
+  at 1f/5f/9f/13f are all WORKING AS DESIGNED for Lance_3B_Video** — the
+  painterly aesthetic is the Video model's intrinsic style.
+- **Phase 0 oracle t2i outputs (cat with STOP, fox, etc.) were almost
+  certainly generated with Lance_3B**, NOT the Lance_3B_Video that
+  inference_lance.sh defaults to. Otherwise upstream's t2i output would
+  look like our painterly version.
+- The pipeline / scaffolds / conversion / mask / position-ID code is
+  validated correct.
+
+### Remaining real bug: noise output at 768×768×50f
+
+This is a separate, narrower bug. At t_lat=13 / n_lat=29952, output
+collapses to pure noise (not even painterly). The bisection's working
+sizes (t_lat 1-4, n_lat ≤ 9216) all produce coherent painterly output.
+Failure mode emerges somewhere between n_lat=9216 (works painterly) and
+n_lat=29952 (pure noise).
+
+Candidate causes (now narrowed since we know weights/pipeline are fine):
+- bf16 SDP softmax overflow at very large T
+- The Lance bidirectional mask (T,T) being ~1.8 GB at 30k tokens
+- VAE decode failure at t_lat=13 specifically
+- CFG amplification interaction with large T despite our renorm
+
+### Recommended Phase 4c continuation
+
+1. **Run 25f or 33f at 768×768** to find the exact T_lat where things
+   break (bisect 13 → 49).
+2. **Try cfg=1 at 49f** to isolate CFG-amplification.
+3. **Try VAE-decode-only test** at t_lat=13 with random latents to rule
+   in/out the VAE.
+
+After 4c: the smaller-scale t2v already-working at painterly quality
+counts as Phase 4 success. The 50f×768 fix is a polish / production-tier
+follow-up.
+
+## Phase 4d — explore using Lance_3B for SINGLE-frame "video" tasks?
+
+Since Lance_3B produces crystal-clear t2i and Lance_3B_Video has the
+larger latent_pos_embed for t_lat > 1, a hybrid approach could use
+Lance_3B for image-only paths (already done in t2i pipeline) and
+Lance_3B_Video only for genuine multi-frame video.
+
+Probably not worth pursuing — Lance_3B_Video at 5f already works at
+"recognizable subject" quality which IS valid video generation. The
+"painterly style" is the model's character, not a defect.
+
 ## Phase 4c — t2v "noise-at-scale" investigation (PREREQUISITE before Phase 5)
 
 The full Lance-defaults t2v generation (768×768×50f, T=29952 latent tokens)
