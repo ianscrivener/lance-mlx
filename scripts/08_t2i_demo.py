@@ -28,6 +28,9 @@ def main() -> int:
     ap.add_argument("--output-png", type=Path, default=Path("/tmp/lance_t2i.png"))
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--steps", type=int, default=30)
+    ap.add_argument("--cfg-scale", type=float, default=4.0,
+                    help="Classifier-free guidance scale. 1.0 disables CFG. "
+                         "Lance default is 4.0.")
     ap.add_argument("--height", type=int, default=768)
     ap.add_argument("--width", type=int, default=768)
     ap.add_argument("--verbose", action="store_true")
@@ -45,13 +48,14 @@ def main() -> int:
 
     print(f"\n=== Generating ===")
     print(f"  prompt: {args.prompt!r}")
-    print(f"  {args.width}x{args.height}, {args.steps} steps, seed={args.seed}")
+    print(f"  {args.width}x{args.height}, {args.steps} steps, "
+          f"cfg={args.cfg_scale}, seed={args.seed}")
     t0 = time.perf_counter()
     img = pipe.generate(
         args.prompt,
         height=args.height, width=args.width,
-        num_steps=args.steps, seed=args.seed,
-        verbose=args.verbose,
+        num_steps=args.steps, cfg_scale=args.cfg_scale,
+        seed=args.seed, verbose=args.verbose,
     )
     t1 = time.perf_counter()
     print(f"  generated in {t1-t0:.1f}s")

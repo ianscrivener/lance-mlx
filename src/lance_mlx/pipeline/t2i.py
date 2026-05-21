@@ -163,6 +163,7 @@ class TextToImagePipeline:
         width: int = 768,
         num_steps: int = 30,
         timestep_shift: float = 3.5,
+        cfg_scale: float = 4.0,           # 1.0 disables CFG; Lance default 4.0
         seed: int = 42,
         verbose: bool = False,
         instruction: str = T2I_INSTRUCTION,
@@ -174,6 +175,10 @@ class TextToImagePipeline:
             height/width: must be divisible by VAE_SPATIAL_DOWNSAMPLE=16. Default 768.
             num_steps: number of Euler steps. Default 30 per Lance config.
             timestep_shift: linear-schedule shift. Default 3.5 per Lance config.
+            cfg_scale: classifier-free guidance scale. 1.0 = no CFG (single
+                conditional forward per step). Lance config uses 4.0 — runs
+                a second unconditional forward (empty user prompt) and blends
+                velocities: v = v_uncond + cfg_scale * (v_cond - v_uncond).
             seed: RNG seed for noise init.
             verbose: print per-step latent stats.
             instruction: system-prompt instruction. Default = Lance t2i convention.
@@ -187,127 +192,64 @@ class TextToImagePipeline:
         w_lat = width // VAE_SPATIAL_DOWNSAMPLE
         n_lat = h_lat * w_lat                      # 2304 for 768²
 
-        # --- 1. Build the prompt template -------------------------------
-        # Lance template: system + user message + assistant slot with N
-        # video_pad tokens (image-as-video convention from Phase 2.1b
-        # investigation). We DO NOT use the processor's expansion logic
-        # here since we don't have an input image — just manually emit
-        # the required number of video_pad tokens.
-        video_pad_str = "<|video_pad|>" * n_lat
-        text = (
-            f"<|im_start|>system\n{instruction}<|im_end|>\n"
-            f"<|im_start|>user\n{prompt}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-            f"<|vision_start|>{video_pad_str}<|vision_end|>"
+        # --- Pre-build per-prompt state ---------------------------------
+        # Each "state" packages the prompt-dependent tensors that don't
+        # change across timesteps — input_ids, text_embeds, position_ids,
+        # position_group, latent_positions. We build TWO states (with
+        # prompt + empty prompt) so the flow loop can do CFG by calling
+        # the model twice per step.
+        cond_state = self._prepare_state(
+            prompt=prompt, instruction=instruction,
+            n_lat=n_lat, h_lat=h_lat, w_lat=w_lat, verbose=verbose,
         )
+        if cfg_scale > 1.0:
+            uncond_state = self._prepare_state(
+                prompt="", instruction=instruction,
+                n_lat=n_lat, h_lat=h_lat, w_lat=w_lat, verbose=False,
+            )
+            if verbose:
+                print(f"  CFG enabled, scale={cfg_scale}, "
+                      f"uncond tokens={uncond_state['T']}, cond tokens={cond_state['T']}")
+        else:
+            uncond_state = None
 
-        # --- 2. Tokenize the assembled prompt ---------------------------
-        # No image input → just the tokenizer, not the full processor.
-        tokenizer = self.processor.tokenizer
-        input_ids = mx.array(
-            [tokenizer(text, add_special_tokens=False)["input_ids"]],
-            dtype=mx.int32,
-        )
-        T = input_ids.shape[1]
-        if verbose:
-            print(f"  prompt tokens: {T} ({T - n_lat} text + {n_lat} latent)")
-
-        # --- 3. Find the latent-token positions in the input_ids --------
-        # video_pad tokens are the N positions where ViT features go in VQA,
-        # but here they're our noisy-latent positions.
-        ids_list = input_ids[0].tolist()
-        latent_positions = [
-            i for i, v in enumerate(ids_list) if v == self.video_pad_token_id
-        ]
-        assert len(latent_positions) == n_lat, (
-            f"expected {n_lat} latent positions, found {len(latent_positions)}"
-        )
-        latent_positions_arr = mx.array(latent_positions, dtype=mx.int32)
-        first_latent_pos = latent_positions[0]
-        text_len_before_latents = first_latent_pos
-        if verbose:
-            print(f"  latent positions span tokens {first_latent_pos}..{first_latent_pos + n_lat - 1}")
-
-        # --- 4. position_ids (3, B=1, T) --------------------------------
-        # Text positions: sequential 1D, broadcast to 3 axes.
-        # Latent positions: 3D grid (t=0, h=row, w=col) starting from text_len,
-        #                   then MaPE re-anchored to 1000.
-        position_ids = self._build_position_ids(
-            T=T, n_lat=n_lat, h_lat=h_lat, w_lat=w_lat,
-            text_len_before_latents=text_len_before_latents,
-            latent_positions=latent_positions,
-        )
-
-        # --- 5. position_group ------------------------------------------
-        # TEXT everywhere except NOISY_VAE at latent positions.
-        position_group = mx.full((T,), int(PositionGroup.TEXT), dtype=mx.int32)
-        # MLX: scatter assignment.
-        position_group = self._scatter_set(
-            position_group, latent_positions_arr, int(PositionGroup.NOISY_VAE)
-        )
-
-        # --- 6. latent_pos_embed indices (flat row-major into 64×64 table)
-        # For each latent grid cell (r, c) in 0..h_lat × 0..w_lat, flatten
-        # to row * 64 + col so it indexes the [4096, 2048] pos_embed table.
+        # latent_pos_embed indices (shared across cond/uncond).
         max_side = 64  # Lance_3B latent_pos_embed is 64×64 = 4096
         lpe_indices = mx.array(
             [r * max_side + c for r in range(h_lat) for c in range(w_lat)],
             dtype=mx.int32,
         )
 
-        # --- 7. Init noise (normalized latent space) --------------------
+        # --- Init noise -------------------------------------------------
         mx.random.seed(seed)
-        # Shape: (B=1, T_lat=1, h_lat, w_lat, C=48). Normalized space is
-        # N(0, 1) per channel after `normalize_latents`. The flow starts
-        # at pure noise and integrates toward the clean latent.
         latents = mx.random.normal((1, 1, h_lat, w_lat, VAE_LATENT_CHANNELS))
         latents_dtype = self.lance_model.embed_tokens.weight.dtype
         latents = latents.astype(latents_dtype)
 
-        # --- 8. Pre-compute text embeddings -----------------------------
-        text_embeds_full = self.lance_model.embed_tokens(input_ids)  # (1, T, D)
-
-        # --- 9. Flow loop -----------------------------------------------
+        # --- Flow loop -------------------------------------------------
         sched = timestep_schedule(num_steps=num_steps, shift=timestep_shift)
         if verbose:
             print(f"  schedule: {[round(float(sched[i]), 4) for i in range(min(6, num_steps+1))]} ...")
 
         for step in range(num_steps):
             t = sched[step]
-            dt = sched[step] - sched[step + 1]   # positive (schedule decreases)
+            dt = sched[step] - sched[step + 1]
 
-            # 9a. Embed VAE latents into LLM space.
-            #   Flatten latents to (1, n_lat, 48), apply vae_in_proj → (1, n_lat, D),
-            #   add latent_pos_embed[lpe_indices] (1, n_lat, D) broadcast,
-            #   add time_embedder(t)[None, None, :] broadcast over all positions.
-            latents_flat = latents.reshape(1, n_lat, VAE_LATENT_CHANNELS)
-            lat_embed = self.lance_model.vae_in_proj(latents_flat)
-            pe = self.lance_model.latent_pos_embed(lpe_indices)[None, ...]  # (1, n_lat, D)
-            lat_embed = lat_embed + pe
-
-            # time embedding broadcast — Lance adds this to ALL positions in
-            # the packed stream during flow steps.
-            t_emb = self.lance_model.time_embedder(t.reshape(1)).reshape(1, 1, -1)
-
-            # Assemble inputs_embeds by inserting lat_embed at latent positions.
-            inputs_embeds = self._scatter_embeds(
-                text_embeds_full, lat_embed, latent_positions_arr,
+            v_cond = self._step_velocity(
+                state=cond_state, latents=latents, t=t,
+                lpe_indices=lpe_indices, n_lat=n_lat,
+                h_lat=h_lat, w_lat=w_lat,
             )
-            inputs_embeds = inputs_embeds + t_emb  # broadcast over T
+            if uncond_state is not None:
+                v_uncond = self._step_velocity(
+                    state=uncond_state, latents=latents, t=t,
+                    lpe_indices=lpe_indices, n_lat=n_lat,
+                    h_lat=h_lat, w_lat=w_lat,
+                )
+                velocity = v_uncond + cfg_scale * (v_cond - v_uncond)
+            else:
+                velocity = v_cond
 
-            # 9b. LanceModel forward.
-            h = self.lance_model(
-                inputs_embeds=inputs_embeds,
-                position_ids=position_ids,
-                position_group=position_group,
-            )
-
-            # 9c. Velocity at noisy positions → reshape to latent grid.
-            h_lat_pos = h[:, latent_positions_arr, :]            # (1, n_lat, D)
-            velocity_flat = self.lance_model.llm2vae(h_lat_pos)  # (1, n_lat, 48)
-            velocity = velocity_flat.reshape(1, 1, h_lat, w_lat, VAE_LATENT_CHANNELS)
-
-            # 9d. Euler step (Lance integrates t=1→0).
             latents = latents - velocity * dt
             mx.eval(latents)
 
@@ -331,6 +273,117 @@ class TextToImagePipeline:
         # Map [-1, 1] → [0, 255] uint8.
         img_u8 = ((img_np + 1.0) * 127.5).clip(0, 255).astype(np.uint8)
         return Image.fromarray(img_u8)
+
+    # ----- per-prompt state assembly ---------------------------------------
+
+    def _prepare_state(
+        self,
+        *,
+        prompt: str,
+        instruction: str,
+        n_lat: int,
+        h_lat: int,
+        w_lat: int,
+        verbose: bool,
+    ) -> dict:
+        """Pack the prompt-dependent state needed for one CFG-arm of the flow.
+
+        Returns dict with: T, input_ids, text_embeds, latent_positions_arr,
+        position_ids, position_group.
+        """
+        video_pad_str = "<|video_pad|>" * n_lat
+        text = (
+            f"<|im_start|>system\n{instruction}<|im_end|>\n"
+            f"<|im_start|>user\n{prompt}<|im_end|>\n"
+            f"<|im_start|>assistant\n"
+            f"<|vision_start|>{video_pad_str}<|vision_end|>"
+        )
+
+        tokenizer = self.processor.tokenizer
+        input_ids = mx.array(
+            [tokenizer(text, add_special_tokens=False)["input_ids"]],
+            dtype=mx.int32,
+        )
+        T = input_ids.shape[1]
+        if verbose:
+            print(f"  prompt tokens: {T} ({T - n_lat} text + {n_lat} latent)")
+
+        ids_list = input_ids[0].tolist()
+        latent_positions = [
+            i for i, v in enumerate(ids_list) if v == self.video_pad_token_id
+        ]
+        assert len(latent_positions) == n_lat, (
+            f"expected {n_lat} latent positions, found {len(latent_positions)}"
+        )
+        latent_positions_arr = mx.array(latent_positions, dtype=mx.int32)
+        first_latent_pos = latent_positions[0]
+        text_len_before_latents = first_latent_pos
+        if verbose:
+            print(f"  latent positions span tokens {first_latent_pos}..{first_latent_pos + n_lat - 1}")
+
+        position_ids = self._build_position_ids(
+            T=T, n_lat=n_lat, h_lat=h_lat, w_lat=w_lat,
+            text_len_before_latents=text_len_before_latents,
+            latent_positions=latent_positions,
+        )
+
+        position_group = mx.full((T,), int(PositionGroup.TEXT), dtype=mx.int32)
+        position_group = self._scatter_set(
+            position_group, latent_positions_arr, int(PositionGroup.NOISY_VAE)
+        )
+
+        text_embeds = self.lance_model.embed_tokens(input_ids)   # (1, T, D)
+        return {
+            "T": T,
+            "input_ids": input_ids,
+            "text_embeds": text_embeds,
+            "latent_positions_arr": latent_positions_arr,
+            "position_ids": position_ids,
+            "position_group": position_group,
+        }
+
+    def _step_velocity(
+        self,
+        *,
+        state: dict,
+        latents: mx.array,
+        t: mx.array,
+        lpe_indices: mx.array,
+        n_lat: int,
+        h_lat: int,
+        w_lat: int,
+    ) -> mx.array:
+        """One forward pass: returns velocity reshaped to latent grid.
+
+        Args:
+            state: from `_prepare_state` (text_embeds, position_ids, etc.)
+            latents: current (B=1, T=1, h_lat, w_lat, C=48)
+            t: scalar mx.array, current timestep
+            lpe_indices: precomputed latent_pos_embed gather indices.
+
+        Returns:
+            velocity: (1, 1, h_lat, w_lat, C=48)
+        """
+        latents_flat = latents.reshape(1, n_lat, VAE_LATENT_CHANNELS)
+        lat_embed = self.lance_model.vae_in_proj(latents_flat)
+        pe = self.lance_model.latent_pos_embed(lpe_indices)[None, ...]
+        lat_embed = lat_embed + pe
+
+        t_emb = self.lance_model.time_embedder(t.reshape(1)).reshape(1, 1, -1)
+
+        inputs_embeds = self._scatter_embeds(
+            state["text_embeds"], lat_embed, state["latent_positions_arr"],
+        )
+        inputs_embeds = inputs_embeds + t_emb
+
+        h = self.lance_model(
+            inputs_embeds=inputs_embeds,
+            position_ids=state["position_ids"],
+            position_group=state["position_group"],
+        )
+        h_lat_pos = h[:, state["latent_positions_arr"], :]
+        velocity_flat = self.lance_model.llm2vae(h_lat_pos)
+        return velocity_flat.reshape(1, 1, h_lat, w_lat, VAE_LATENT_CHANNELS)
 
     # ----- helpers -----
 
