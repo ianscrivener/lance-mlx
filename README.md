@@ -15,8 +15,8 @@ MLX port of **Lance** for Apple Silicon. Lance is a 3B-active / ~12B-total param
 | x2t_image VQA (image → text answer) | ✅ Functional, content-correct across all 6 oracle cases |
 | KV cache for fast autoregressive decode | ✅ ~2-3× speedup on long generations |
 | **t2i (text → image generation)** | **✅ Photorealistic, prompt-aligned output. Cat with STOP poster, fantasy dragon, rainbow fox all generate cleanly.** |
-| image_edit | ⏳ Phase 3.5 |
-| t2v / video_edit (video generation) | ⏳ Phase 4 |
+| **t2v (text → video generation)** | **✅ MVP working — red panda surfing on a wave shows real temporal motion. Phase 4a complete at 256×256×16f; scale-up to 768×768×50f is Phase 4b.** |
+| image_edit / video_edit | ⏳ Phase 3.5 / 4d |
 | 8-bit + 4-bit quants + HF publish | ⏳ Phase 5 |
 
 **Try it:**
