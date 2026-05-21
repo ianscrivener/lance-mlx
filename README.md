@@ -10,11 +10,12 @@ MLX port of **Lance** for Apple Silicon. Lance is a 3B-active / ~12B-total param
 
 | Capability | Status |
 |---|---|
-| Convert HF safetensors → MLX bf16 (both checkpoints) | ✅ `scripts/02_convert.py` |
+| Convert HF safetensors → MLX bf16 (both checkpoints + Wan2.2 VAE) | ✅ `scripts/02_convert.py`, `scripts/06_convert_wan_vae.py` |
 | Load `Lance_3B` + `Lance_3B_Video` into `LanceModel` | ✅ 0 missing keys, dummy forward verified |
-| x2t_image VQA (image → text answer) | ✅ MVP, ~95% parity vs PyTorch oracle |
-| KV cache for fast autoregressive decode | ⏳ Phase 2.1 |
-| t2i / image_edit (image generation) | ⏳ Phase 3 |
+| x2t_image VQA (image → text answer) | ✅ Functional, content-correct across all 6 oracle cases |
+| KV cache for fast autoregressive decode | ✅ ~2-3× speedup on long generations |
+| **t2i (text → image generation)** | **✅ Photorealistic, prompt-aligned output. Cat with STOP poster, fantasy dragon, rainbow fox all generate cleanly.** |
+| image_edit | ⏳ Phase 3.5 |
 | t2v / video_edit (video generation) | ⏳ Phase 4 |
 | 8-bit + 4-bit quants + HF publish | ⏳ Phase 5 |
 
