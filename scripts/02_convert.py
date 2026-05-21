@@ -106,6 +106,11 @@ KEEP_F32_PATTERNS = [
     re.compile(r".*\.k_norm.*\.weight$"),
 ]
 
+# Set globally by `--no-keep-f32` to make ALL tensors cast to the requested
+# dtype (including norm scales). Used to test whether fp32-promotion-via-norms
+# is the source of t2i painterly-quality issue (Phase 3e investigation).
+_DISABLE_KEEP_F32 = False
+
 VARIANT_DIRS = {
     "lance_3b":       "Lance_3B",
     "lance_3b_video": "Lance_3B_Video",
@@ -140,6 +145,8 @@ def remap(hf_key: str) -> tuple[str | None, str | None]:
 
 
 def should_keep_f32(mlx_key: str) -> bool:
+    if _DISABLE_KEEP_F32:
+        return False
     return any(p.match(mlx_key) for p in KEEP_F32_PATTERNS)
 
 
@@ -315,9 +322,19 @@ def main() -> int:
     ap.add_argument("--output", type=Path,
                     help="Destination dir (required unless --dry-run)")
     ap.add_argument("--dtype", choices=["bf16", "fp16", "fp32"], default="bf16")
+    ap.add_argument("--no-keep-f32", action="store_true",
+                    help="Cast ALL tensors to --dtype, including norm scales "
+                         "that KEEP_F32_PATTERNS would normally preserve as F32. "
+                         "Used to test whether fp32-promotion-via-norms is "
+                         "compounding t2i image-quality issues (Phase 3e).")
     ap.add_argument("--dry-run", action="store_true",
                     help="Header-only validation, no download, no file writes")
     args = ap.parse_args()
+
+    if args.no_keep_f32:
+        global _DISABLE_KEEP_F32
+        _DISABLE_KEEP_F32 = True
+        print("(--no-keep-f32: casting ALL tensors to --dtype, including norm scales)")
 
     if args.dry_run:
         if not args.hf_repo:

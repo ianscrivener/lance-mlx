@@ -164,6 +164,8 @@ class TextToImagePipeline:
         num_steps: int = 30,
         timestep_shift: float = 3.5,
         cfg_scale: float = 4.0,           # 1.0 disables CFG; Lance default 4.0
+        cfg_renorm_type: str = "global",  # "global" | "channel" | "none". Lance default: global.
+        cfg_renorm_min: float = 0.0,      # Lance default: 0.0 (never upscale).
         seed: int = 42,
         verbose: bool = False,
         instruction: str = T2I_INSTRUCTION,
@@ -246,7 +248,29 @@ class TextToImagePipeline:
                     lpe_indices=lpe_indices, n_lat=n_lat,
                     h_lat=h_lat, w_lat=w_lat,
                 )
-                velocity = v_uncond + cfg_scale * (v_cond - v_uncond)
+                v_cfg = v_uncond + cfg_scale * (v_cond - v_uncond)
+
+                # CFG renormalization per upstream Lance (lance.py:712-725).
+                # Without this, cfg_scale=4 makes |v_cfg| ~4x |v_cond|, causing
+                # latents to overshoot and decode to a blurry/noisy mean. The
+                # renorm clamps |v_cfg| to at most |v_cond|, restoring proper
+                # step magnitudes.
+                if cfg_renorm_type == "global":
+                    norm_cond = mx.sqrt(mx.sum(v_cond * v_cond))   # scalar
+                    norm_cfg  = mx.sqrt(mx.sum(v_cfg  * v_cfg))    # scalar
+                    ratio = norm_cond / (norm_cfg + 1e-8)
+                    scale = mx.clip(ratio, cfg_renorm_min, 1.0)
+                    velocity = v_cfg * scale
+                elif cfg_renorm_type == "channel":
+                    # Per-channel norm: shape (1, 1, h, w, 1) so each spatial
+                    # cell's channel-vector is rescaled independently.
+                    norm_cond = mx.sqrt(mx.sum(v_cond * v_cond, axis=-1, keepdims=True))
+                    norm_cfg  = mx.sqrt(mx.sum(v_cfg  * v_cfg,  axis=-1, keepdims=True))
+                    ratio = norm_cond / (norm_cfg + 1e-8)
+                    scale = mx.clip(ratio, cfg_renorm_min, 1.0)
+                    velocity = v_cfg * scale
+                else:   # "none" or anything else — no renorm
+                    velocity = v_cfg
             else:
                 velocity = v_cond
 
@@ -333,6 +357,16 @@ class TextToImagePipeline:
         )
 
         text_embeds = self.lance_model.embed_tokens(input_ids)   # (1, T, D)
+
+        # Build the Lance attention mask: causal everywhere PLUS bidirectional
+        # within the noisy-VAE token block. Per upstream `data/data_utils.py
+        # create_sparse_mask`, the mask is `causal_mask OR full_and_noise_mask`
+        # — tokens in the same "noise" segment all see each other regardless
+        # of order. WITHOUT this, the noisy-VAE position 0 of a 2304-token
+        # image grid can only see itself + text → no spatial context →
+        # consistent painterly/blurry outputs.
+        mask = self._build_block_mask(T, latent_positions, dtype=text_embeds.dtype)
+
         return {
             "T": T,
             "input_ids": input_ids,
@@ -340,7 +374,28 @@ class TextToImagePipeline:
             "latent_positions_arr": latent_positions_arr,
             "position_ids": position_ids,
             "position_group": position_group,
+            "mask": mask,
         }
+
+    @staticmethod
+    def _build_block_mask(T: int, latent_positions: list[int], dtype) -> mx.array:
+        """Causal OR bidirectional-within-latent-block additive mask (T, T).
+
+        Returns float mask with 0 where attention is allowed and -1e9
+        (effectively -inf) where blocked. Shape (T, T) — broadcasts to
+        (B, H, T, T) in SDP.
+        """
+        i = mx.arange(T)[:, None]      # (T, 1)
+        j = mx.arange(T)[None, :]      # (1, T)
+        lat_start = latent_positions[0]
+        lat_end = latent_positions[-1] + 1
+        in_lat_q = (i >= lat_start) & (i < lat_end)
+        in_lat_kv = (j >= lat_start) & (j < lat_end)
+        bidirectional = in_lat_q & in_lat_kv
+        allowed = (i >= j) | bidirectional
+        neg_inf = mx.array(-1e9, dtype=dtype)
+        zero = mx.array(0.0, dtype=dtype)
+        return mx.where(allowed, zero, neg_inf)
 
     def _step_velocity(
         self,
@@ -391,6 +446,7 @@ class TextToImagePipeline:
             inputs_embeds=inputs_embeds,
             position_ids=state["position_ids"],
             position_group=state["position_group"],
+            mask=state["mask"],     # causal + bidirectional-within-latent block
         )
         h_lat_pos = h[:, state["latent_positions_arr"], :]
         velocity_flat = self.lance_model.llm2vae(h_lat_pos)
