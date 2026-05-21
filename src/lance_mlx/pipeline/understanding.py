@@ -21,6 +21,7 @@ from typing import Optional
 
 import mlx.core as mx
 import mlx.nn as nn
+from mlx_lm.models.cache import KVCache
 from mlx_vlm.models.qwen2_5_vl.config import TextConfig, VisionConfig
 from mlx_vlm.models.qwen2_5_vl.vision import VisionModel
 from PIL import Image
@@ -330,12 +331,59 @@ class UnderstandingPipeline:
         *,
         max_new_tokens: int = 256,
         verbose: bool = False,
+        use_cache: bool = True,
     ) -> str:
         """Greedy-decode an answer to `question` about `image`.
 
+        Args:
+            image: PIL image.
+            question: question text.
+            max_new_tokens: hard cap on generated tokens.
+            verbose: print per-step token info.
+            use_cache: enable KV cache (default True). Set False to run the
+                slower full-recompute path — useful as a parity baseline.
+
         Returns the decoded answer text (without the chat-template suffix).
         """
-        # 1. Build chat-templated prompt with image placeholder.
+        # 1-6. Preprocess (shared between cached and non-cached paths).
+        prompt_state = self._prepare_prompt(image, question, verbose=verbose)
+        input_ids = prompt_state["input_ids"]
+        inputs_embeds = prompt_state["inputs_embeds"]
+        position_ids = prompt_state["position_ids"]
+        position_group = prompt_state["position_group"]
+
+        # 7. Greedy decode loop.
+        if use_cache:
+            generated_ids = self._decode_with_cache(
+                inputs_embeds=inputs_embeds,
+                position_ids=position_ids,
+                position_group=position_group,
+                max_new_tokens=max_new_tokens,
+                verbose=verbose,
+            )
+        else:
+            generated_ids = self._decode_no_cache(
+                inputs_embeds=inputs_embeds,
+                input_ids=input_ids,
+                position_ids=position_ids,
+                position_group=position_group,
+                max_new_tokens=max_new_tokens,
+                verbose=verbose,
+            )
+
+        # 8. Decode.
+        return self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True)
+
+    # ---- shared prompt preparation ----------------------------------------
+
+    def _prepare_prompt(self, image, question, *, verbose: bool) -> dict:
+        """Steps 1-6 of generate: build prompt, ViT forward, merge, position IDs.
+
+        Returns dict with: input_ids, inputs_embeds, position_ids, position_group.
+        Shared between cached/uncached decode paths so both see byte-identical
+        inputs to the layer stack (eliminates a class of parity-test confounders).
+        """
+        # 1. Chat-templated prompt with image placeholder.
         messages = [
             {
                 "role": "user",
@@ -349,8 +397,7 @@ class UnderstandingPipeline:
             messages, tokenize=False, add_generation_prompt=True,
         )
 
-        # 2. Preprocess: expands image_token to N image_pad tokens, returns pixel_values
-        #    + image_grid_thw + input_ids.
+        # 2. Preprocess.
         inputs = self.processor(images=image, text=text, return_tensors="mlx")
         input_ids = inputs["input_ids"]
         pixel_values = inputs["pixel_values"]
@@ -368,14 +415,14 @@ class UnderstandingPipeline:
         if verbose:
             print(f"  vit features: {image_features.shape}")
 
-        # 4. Text embeddings + merge with ViT features at image-pad positions.
+        # 4. Merge text embeds + ViT features.
         text_embeds = self.lance_model.embed_tokens(input_ids)
         inputs_embeds = _merge_text_embeds_and_image_features(
             text_embeds, image_features, input_ids,
             self.image_token_id, self.video_token_id,
         )
 
-        # 5. Position IDs (3D for mRoPE, image-grid-aware).
+        # 5. Position IDs.
         position_ids, _ = _compute_position_ids(
             input_ids, image_grid_thw,
             spatial_merge_size=self.vision_config.spatial_merge_size,
@@ -384,21 +431,78 @@ class UnderstandingPipeline:
             vision_start_token_id=self.vision_start_token_id,
         )
 
-        # 6. Position group: all UND (x2t never touches GEN).
+        # 6. Position group: all UND for VQA.
         T = input_ids.shape[1]
         position_group = mx.full((T,), int(PositionGroup.TEXT), dtype=mx.int32)
 
-        # 7. Greedy decode loop (no KV cache for v1).
-        generated_ids: list[int] = []
-        for step in range(max_new_tokens):
-            h = self.lance_model(
-                inputs_embeds=inputs_embeds,
-                position_ids=position_ids,
-                position_group=position_group,
+        return {
+            "input_ids": input_ids,
+            "inputs_embeds": inputs_embeds,
+            "position_ids": position_ids,
+            "position_group": position_group,
+        }
+
+    # ---- KV-cached decode path ---------------------------------------------
+
+    def _decode_with_cache(
+        self,
+        *,
+        inputs_embeds: mx.array,
+        position_ids: mx.array,
+        position_group: mx.array,
+        max_new_tokens: int,
+        verbose: bool,
+    ) -> list[int]:
+        """Prefill the full prompt to populate KV caches, then iterate one
+        token at a time using the cache.
+
+        Per-layer cache: one `mlx_lm.models.cache.KVCache` instance per
+        LanceMoTLayer. The cache stores already-routed K/V (i.e. the output
+        of the per-token UND/GEN projection merge), so resuming on new
+        tokens just appends without re-running routing on cached positions.
+        """
+        n_layers = len(self.lance_model.layers)
+        cache = [KVCache() for _ in range(n_layers)]
+
+        # Prefill — run the full prompt through the stack with empty caches.
+        h = self.lance_model(
+            inputs_embeds=inputs_embeds,
+            position_ids=position_ids,
+            position_group=position_group,
+            cache=cache,
+        )
+        logits = self.lance_model.lm_head(h[:, -1:, :])
+        next_token = mx.argmax(logits[:, -1, :], axis=-1).item()
+        generated_ids: list[int] = [next_token]
+
+        if verbose:
+            tok_str = self.processor.tokenizer.decode([next_token])
+            print(f"  step 0 (prefill): token {next_token} ({tok_str!r})")
+
+        if next_token == self.eos_token_id:
+            return generated_ids
+
+        # Track the trailing 3D position so we can extend by +1 each step.
+        # For text positions after an image, all 3 axes carry the same value,
+        # so taking [-1:] from any axis gives the right next-step base.
+        last_pos = position_ids[:, :, -1:]  # (3, 1, 1)
+        single_pg = mx.array([int(PositionGroup.TEXT)], dtype=mx.int32)
+
+        # Decode steps — one token at a time, cache grows by 1 each step.
+        for step in range(1, max_new_tokens):
+            next_embed = self.lance_model.embed_tokens(
+                mx.array([[next_token]], dtype=mx.int32)
             )
-            # Logits at the LAST position only — that's where the next token comes from.
-            logits = self.lance_model.lm_head(h[:, -1:, :])  # (1, 1, vocab)
-            next_token = mx.argmax(logits[:, -1, :], axis=-1).item()  # scalar
+            next_pos = last_pos + 1  # (3, 1, 1)
+
+            h = self.lance_model(
+                inputs_embeds=next_embed,
+                position_ids=next_pos,
+                position_group=single_pg,
+                cache=cache,
+            )
+            logits = self.lance_model.lm_head(h[:, -1:, :])
+            next_token = mx.argmax(logits[:, -1, :], axis=-1).item()
             generated_ids.append(next_token)
 
             if verbose and step < 10:
@@ -408,7 +512,42 @@ class UnderstandingPipeline:
             if next_token == self.eos_token_id:
                 break
 
-            # Append the new token to the sequence for the next step.
+            last_pos = next_pos
+
+        return generated_ids
+
+    # ---- No-cache decode path (parity baseline) ----------------------------
+
+    def _decode_no_cache(
+        self,
+        *,
+        inputs_embeds: mx.array,
+        input_ids: mx.array,
+        position_ids: mx.array,
+        position_group: mx.array,
+        max_new_tokens: int,
+        verbose: bool,
+    ) -> list[int]:
+        """Full re-forward each step. Slower but no cache state; useful as
+        a parity baseline against the cached path."""
+        generated_ids: list[int] = []
+        for step in range(max_new_tokens):
+            h = self.lance_model(
+                inputs_embeds=inputs_embeds,
+                position_ids=position_ids,
+                position_group=position_group,
+            )
+            logits = self.lance_model.lm_head(h[:, -1:, :])
+            next_token = mx.argmax(logits[:, -1, :], axis=-1).item()
+            generated_ids.append(next_token)
+
+            if verbose and step < 10:
+                tok_str = self.processor.tokenizer.decode([next_token])
+                print(f"  step {step}: token {next_token} ({tok_str!r})")
+
+            if next_token == self.eos_token_id:
+                break
+
             next_embed = self.lance_model.embed_tokens(
                 mx.array([[next_token]], dtype=input_ids.dtype)
             )
@@ -416,12 +555,10 @@ class UnderstandingPipeline:
             input_ids = mx.concatenate(
                 [input_ids, mx.array([[next_token]], dtype=input_ids.dtype)], axis=1,
             )
-            # Extend position_ids by one along the T axis (continuing the max).
             last_pos = position_ids[:, :, -1:]
             position_ids = mx.concatenate([position_ids, last_pos + 1], axis=2)
             position_group = mx.concatenate(
                 [position_group, mx.array([int(PositionGroup.TEXT)], dtype=mx.int32)], axis=0,
             )
 
-        # 8. Decode.
-        return self.processor.tokenizer.decode(generated_ids, skip_special_tokens=True)
+        return generated_ids
