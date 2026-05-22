@@ -22,6 +22,7 @@ Outputs:
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import sys
@@ -35,7 +36,6 @@ ORACLE_DIR = Path(
 )
 LANCE_WEIGHTS = Path("/Volumes/DEV_VOL1/VideoResearch/lance-mlx-models/Lance-3B-Video-bf16")
 VAE_WEIGHTS = Path("/Volumes/DEV_VOL1/VideoResearch/lance-mlx-models/Wan22-VAE-bf16/vae.safetensors")
-OUT_DIR = Path("/tmp/lance_oracle_pass")
 
 # Generation config — production envelope (n_lat = 13 × 48 × 48 = 9,216)
 GEN_HEIGHT = 768
@@ -43,7 +43,6 @@ GEN_WIDTH = 768
 GEN_FRAMES = 13
 NUM_STEPS = 30
 CFG_SCALE = 4.0
-SEED = 42
 
 # Oracle has 49 frames; for comparison we extract one midframe
 ORACLE_MID_IDX = 24       # frame 24 of 49
@@ -51,13 +50,27 @@ OURS_MID_IDX = 6          # frame 6 of 13
 
 
 def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=42,
+                    help="Random seed for noise init (default 42, matches oracle)")
+    ap.add_argument("--out-dir", type=Path, default=None,
+                    help="Output dir (default /tmp/lance_oracle_pass_seed{SEED})")
+    ap.add_argument("--prompts", type=str, default=None,
+                    help="Comma-sep list of prompt IDs (e.g. '000000.mp4,000001.mp4'); default = all")
+    args = ap.parse_args()
+    seed = int(args.seed)
+    OUT_DIR = args.out_dir or Path(f"/tmp/lance_oracle_pass_seed{seed}")
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    SEED = seed
 
     prompts = json.loads((ORACLE_DIR / "prompt.json").read_text())
-    prompt_ids = sorted(prompts.keys())   # e.g. ['000000.mp4', '000001.mp4', ...]
+    if args.prompts:
+        prompt_ids = [p.strip() for p in args.prompts.split(",")]
+    else:
+        prompt_ids = sorted(prompts.keys())   # e.g. ['000000.mp4', '000001.mp4', ...]
 
     print(f"┏━━ Phase 5k — Full oracle pass at 768²×13f ━━━━━━━━━━━━━━━━━━━━━━━")
-    print(f"┃ prompts : {len(prompt_ids)}")
+    print(f"┃ prompts : {len(prompt_ids)} ({prompt_ids if len(prompt_ids) <= 3 else 'all'})")
     print(f"┃ config  : {GEN_HEIGHT}×{GEN_WIDTH} × {GEN_FRAMES}f, "
           f"{NUM_STEPS} steps, CFG={CFG_SCALE}, seed={SEED}")
     print(f"┃ fix     : latent_pos_base=0 (default since Phase 5j)")
