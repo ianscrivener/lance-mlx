@@ -161,14 +161,19 @@ class TextToVideoPipeline:
         seed: int = 42,
         verbose: bool = False,
         instruction: str = T2V_INSTRUCTION,
-        mape_anchor: int | None = MAPE_ANCHOR_VIDEO_GEN,
+        mape_anchor: int | None = None,
     ) -> mx.array:
         """`mape_anchor`: temporal-anchor value for latent t-axis positions.
-        Defaults to MAPE_ANCHOR_VIDEO_GEN=2000 (preserves prior behavior).
-        Pass None to skip the anchor shift entirely — matches upstream's
-        `shift_position_ids` behavior for pure t2v, whose gate
-        `attn_mode in ['full_noise','full']` never fires (only 'noise' is
-        present). Under investigation as Candidate 0 in github issue #2.
+        **Default changed to None on 2026-05-21** after Phase 5d scale bisect
+        (github issue #2) showed that no-shift produces photorealistic
+        prompt-aligned output at every practical scale (256² to 768²×13f,
+        n_lat ≤ 9216) where the old default (2000) produced painterly
+        smearing. The shift was a port-side deviation from upstream
+        `shift_position_ids` (whose gate never fires for pure t2v).
+        Pass `mape_anchor=2000` to restore legacy behavior. At very high
+        n_lat (≥ ~12k, e.g. 768²×17f or larger) outputs may degrade —
+        coherence threshold is around n_lat=11,520. The 768²×50f oracle
+        scale still has a separate second bug under investigation.
 
         `cfg_interval`: (lo, hi) tuple — CFG fires only when `lo < t <= hi`,
         else falls to cfg_scale=1.0 (no CFG) for that step. Upstream Lance

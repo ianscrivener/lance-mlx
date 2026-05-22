@@ -17,7 +17,7 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 
 ## Status
 
-🟡 **Image MVP is production; video has a port quality issue under investigation (2026-05-21).** All six Lance task families run end-to-end on Apple Silicon. Image (t2i, image_edit, x2t_image) reproduces the bf16 PyTorch reference quality. Video pipelines (t2v, video_edit, x2t_video) produce *painterly* output where the Phase 0 PyTorch reference produces *photorealistic 3D-cinematic* — a port-side numerical or routing bug we just identified ([issue #2](https://github.com/xocialize/lance-mlx/issues/2)). We're documenting this transparently rather than shipping the wrong framing — earlier model cards described the painterly look as "by design," which the oracle data shows is incorrect.
+🟢 **Feature-complete on Apple Silicon (2026-05-21).** Image (t2i, image_edit, x2t_image) reproduces the bf16 PyTorch reference quality. Video (t2v, video_edit, x2t_video) now also reproduces the **photorealistic 3D-cinematic** Phase 0 reference quality at scales up to ~768²×13f / n_lat≤9,216 — the [Phase 5d port-bug fix](./notes/phase5d_breakthrough.md) (default `mape_anchor=None`, removing a port-side temporal-shift that upstream `shift_position_ids` doesn't fire for pure t2v) is live as of commit `d13919c`+. At very high token counts (≥768²×17f) outputs degrade — a separate residual bug tracked in [issue #2](https://github.com/xocialize/lance-mlx/issues/2).
 
 | Capability | Status |
 |---|---|
@@ -27,9 +27,9 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 | KV cache for fast autoregressive decode | ✅ 1.7×–2.8× speedup on long generations |
 | **t2i (text → image generation)** | **✅ Production. Photorealistic, prompt-aligned output.** |
 | **image_edit (instruction-based)** | **✅ Production. "Remove hat" preserves identity + style + signature; "Add pearl necklace" leaves rest intact.** |
-| **t2v (text → video)** | 🚧 **Port quality bug. Runs end-to-end, prompt-aligned content recognizable, but output is painterly where the PyTorch oracle is photorealistic 3D-cinematic. Tracked as [issue #2](https://github.com/xocialize/lance-mlx/issues/2).** |
-| **x2t_video (video VQA)** | **✅ Validated against Phase 0 oracle. Cooking video → kitchen+pan+spatula+tomato+meat all content-correct in 17.5 s.** (Unaffected by the t2v bug — pure ViT+UND-tower path.) |
-| **video_edit (instruction-based)** | 🚧 Inherits t2v quality issue. End-to-end works ("Change balls to red" recolors); cinematic fidelity blocked on the t2v fix. |
+| **t2v (text → video)** | ✅ **Photorealistic at n_lat ≤ 9,216** (256–768² × ≤13f; 480×704×17f).  Phase 5d fix landed. ⚠️ Degrades at very high n_lat (768²×17f+) — residual bug in [issue #2](https://github.com/xocialize/lance-mlx/issues/2). |
+| **x2t_video (video VQA)** | **✅ Validated against Phase 0 oracle.** Cooking video → kitchen+pan+spatula+tomato+meat all content-correct in 17.5 s. |
+| **video_edit (instruction-based)** | ✅ Same envelope as t2v: works at ≤9,216 latent tokens after Phase 5d fix. |
 | 8-bit + 4-bit quants + HF community variants | ⏳ Phase 5b |
 
 **Try it:**
