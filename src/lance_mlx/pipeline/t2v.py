@@ -157,6 +157,7 @@ class TextToVideoPipeline:
         cfg_scale: float = 4.0,
         cfg_renorm_type: str = "global",
         cfg_renorm_min: float = 0.0,
+        cfg_interval: tuple[float, float] | None = None,
         seed: int = 42,
         verbose: bool = False,
         instruction: str = T2V_INSTRUCTION,
@@ -168,7 +169,18 @@ class TextToVideoPipeline:
         `shift_position_ids` behavior for pure t2v, whose gate
         `attn_mode in ['full_noise','full']` never fires (only 'noise' is
         present). Under investigation as Candidate 0 in github issue #2.
+
+        `cfg_interval`: (lo, hi) tuple — CFG fires only when `lo < t <= hi`,
+        else falls to cfg_scale=1.0 (no CFG) for that step. Upstream Lance
+        default per `config_factory.py` is `[0.4, 1.0]`. Pass None to apply
+        CFG at every step (legacy MLX port behavior — likely a contributor
+        to the painterly aesthetic bug per github issue #2 Candidate 1b).
         """
+        if cfg_interval is None:
+            # Legacy behavior: CFG at every step. Effectively cfg_interval=[-inf, +inf].
+            cfg_lo, cfg_hi = float("-inf"), float("inf")
+        else:
+            cfg_lo, cfg_hi = float(cfg_interval[0]), float(cfg_interval[1])
         """Generate a video as (T_decoded, H, W, 3) uint8-compatible mx.array.
 
         Caller is responsible for encoding to MP4 (see scripts/10_t2v_demo.py
@@ -235,19 +247,23 @@ class TextToVideoPipeline:
         for step in range(num_steps):
             t = sched[step]
             dt = sched[step] - sched[step + 1]
+            # Per upstream Lance: CFG fires only inside cfg_interval; outside, scale collapses to 1.0.
+            t_scalar = float(t.item()) if hasattr(t, "item") else float(t)
+            cfg_active = (t_scalar > cfg_lo) and (t_scalar <= cfg_hi)
+            cfg_scale_step = cfg_scale if cfg_active else 1.0
 
             v_cond = self._step_velocity(
                 state=cond_state, latents=latents, t=t,
                 lpe_indices=lpe_indices,
                 n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat,
             )
-            if uncond_state is not None:
+            if uncond_state is not None and cfg_scale_step > 1.0:
                 v_uncond = self._step_velocity(
                     state=uncond_state, latents=latents, t=t,
                     lpe_indices=lpe_indices,
                     n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat,
                 )
-                v_cfg = v_uncond + cfg_scale * (v_cond - v_uncond)
+                v_cfg = v_uncond + cfg_scale_step * (v_cond - v_uncond)
 
                 if cfg_renorm_type == "global":
                     norm_cond = mx.sqrt(mx.sum(v_cond * v_cond))

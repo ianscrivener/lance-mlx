@@ -46,7 +46,11 @@ def main() -> int:
                     help="Oracle prompt id to replay (000000 = red panda surfing).")
     ap.add_argument("--no-mape-shift", action="store_true",
                     help="Skip the MAPE_ANCHOR_VIDEO_GEN=2000 shift. Candidate 0 "
-                         "hypothesis from issue #2. RECOMMENDED for this test.")
+                         "hypothesis from issue #2.")
+    ap.add_argument("--cfg-interval", type=str, default="",
+                    help="cfg_interval='0.4,1.0' applies CFG only when timestep in (lo, hi]. "
+                         "Upstream default per config_factory.py is '0.4,1.0'. Empty = legacy "
+                         "(CFG every step). Candidate 1b hypothesis.")
     ap.add_argument("--num-frames", type=int, default=50)
     ap.add_argument("--height", type=int, default=768)
     ap.add_argument("--width", type=int, default=768)
@@ -73,6 +77,13 @@ def main() -> int:
     print(f"┃ config      : {args.num_frames}f × {args.width}×{args.height}, "
           f"{args.steps} steps, CFG={args.cfg_scale}, seed={args.seed}")
     print(f"┃ MaPE shift  : {'DISABLED (None)' if args.no_mape_shift else f'2000 (default)'}")
+    cfg_interval_tuple = None
+    if args.cfg_interval:
+        lo, hi = [float(x) for x in args.cfg_interval.split(",")]
+        cfg_interval_tuple = (lo, hi)
+        print(f"┃ cfg_interval: ({lo}, {hi}]")
+    else:
+        print(f"┃ cfg_interval: legacy (every step)")
     print(f"┃ out         : {args.out_dir}")
     print("┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -95,6 +106,7 @@ def main() -> int:
         height=args.height, width=args.width,
         num_steps=args.steps,
         cfg_scale=args.cfg_scale,
+        cfg_interval=cfg_interval_tuple,
         seed=args.seed,
         mape_anchor=None if args.no_mape_shift else 2000,
         verbose=True,
@@ -158,6 +170,7 @@ def main() -> int:
             "steps": args.steps, "cfg_scale": args.cfg_scale,
             "seed": args.seed,
             "mape_shift_disabled": args.no_mape_shift,
+            "cfg_interval": list(cfg_interval_tuple) if cfg_interval_tuple else None,
         },
         "wall_clock_s": round(elapsed, 1),
         "mlx_decoded_frames": int(frames.shape[0]),
