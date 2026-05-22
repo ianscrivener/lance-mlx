@@ -162,6 +162,7 @@ class TextToVideoPipeline:
         verbose: bool = False,
         instruction: str = T2V_INSTRUCTION,
         mape_anchor: int | None = None,
+        cfg_uncond_mode: str = "empty_prompt",
     ) -> mx.array:
         """`mape_anchor`: temporal-anchor value for latent t-axis positions.
         **Default changed to None on 2026-05-21** after Phase 5d scale bisect
@@ -180,6 +181,15 @@ class TextToVideoPipeline:
         default per `config_factory.py` is `[0.4, 1.0]`. Pass None to apply
         CFG at every step (legacy MLX port behavior — likely a contributor
         to the painterly aesthetic bug per github issue #2 Candidate 1b).
+
+        `cfg_uncond_mode`: 'empty_prompt' (legacy) feeds the full chat-template
+        sequence with `prompt=''` through the LLM for the uncond branch.
+        'no_text' matches upstream Lance (per `lance_lance.py:627-630` and
+        `uncond_forward`): the uncond branch DROPS all text positions and
+        feeds only the latent block through the LLM. Upstream's CFG direction
+        is "with text vs no text at all" rather than "with prompt vs empty
+        prompt"; the latter under-amplifies fine-detail features. **Candidate 3
+        in issue #2.**
         """
         if cfg_interval is None:
             # Legacy behavior: CFG at every step. Effectively cfg_interval=[-inf, +inf].
@@ -212,16 +222,17 @@ class TextToVideoPipeline:
         cond_state = self._prepare_state(
             prompt=prompt, instruction=instruction,
             n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat, verbose=verbose,
-            mape_anchor=mape_anchor,
+            mape_anchor=mape_anchor, uncond_no_text=False,
         )
         if cfg_scale > 1.0:
             uncond_state = self._prepare_state(
                 prompt="", instruction=instruction,
                 n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat, verbose=False,
                 mape_anchor=mape_anchor,
+                uncond_no_text=(cfg_uncond_mode == "no_text"),
             )
             if verbose:
-                print(f"  CFG enabled, scale={cfg_scale}, "
+                print(f"  CFG enabled, scale={cfg_scale}, mode={cfg_uncond_mode}, "
                       f"uncond tokens={uncond_state['T']}, cond tokens={cond_state['T']}")
         else:
             uncond_state = None
@@ -323,15 +334,31 @@ class TextToVideoPipeline:
         w_lat: int,
         verbose: bool,
         mape_anchor: int | None = MAPE_ANCHOR_VIDEO_GEN,
+        uncond_no_text: bool = False,
     ) -> dict:
-        """Pack the prompt-dependent state needed for one CFG-arm of the flow."""
+        """Pack the prompt-dependent state needed for one CFG-arm of the flow.
+
+        `uncond_no_text=True` builds a text-stripped sequence containing only
+        the latent block (per upstream Lance's `uncond_split_pro_new`,
+        `lance_lance.py:755+`, which selects positions where
+        `i_sample_modality != 0`, i.e. non-text positions only). Used for the
+        CFG-uncond arm. The CFG direction becomes `(v_text - v_no_text)` rather
+        than `(v_text - v_empty_prompt)` which under-amplifies fine-detail
+        features.
+        """
         video_pad_str = "<|video_pad|>" * n_lat
-        text = (
-            f"<|im_start|>system\n{instruction}<|im_end|>\n"
-            f"<|im_start|>user\n{prompt}<|im_end|>\n"
-            f"<|im_start|>assistant\n"
-            f"<|vision_start|>{video_pad_str}<|vision_end|>"
-        )
+        if uncond_no_text:
+            # Minimal sequence — just the latent block, no chat template.
+            # Wrap in vision_start/vision_end so the latent block is still
+            # delimited (these are also non-text modality positions upstream).
+            text = f"<|vision_start|>{video_pad_str}<|vision_end|>"
+        else:
+            text = (
+                f"<|im_start|>system\n{instruction}<|im_end|>\n"
+                f"<|im_start|>user\n{prompt}<|im_end|>\n"
+                f"<|im_start|>assistant\n"
+                f"<|vision_start|>{video_pad_str}<|vision_end|>"
+            )
 
         tokenizer = self.processor.tokenizer
         input_ids = mx.array(
