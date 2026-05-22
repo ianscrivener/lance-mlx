@@ -149,6 +149,16 @@ class LanceMoTAttention(Attention):
         self.q_norm_moe_gen = nn.RMSNorm(head_dim, eps=eps)
         self.k_norm_moe_gen = nn.RMSNorm(head_dim, eps=eps)
 
+        # P0a candidate (issue #2 / Phase 5g): when True, compute cos/sin and
+        # the q*cos + rotate_half(q)*sin rotation in fp32 instead of inheriting
+        # mlx-vlm's `Qwen2RotaryEmbedding`'s downcast (language.py:73 does
+        # `cos.astype(x.dtype)` → bf16 in our run). Hypothesis: bf16 rotation
+        # error perturbs high-frequency channels of the flow-matching velocity
+        # field, manifesting as soft water/fur/paws. Set via
+        # `LanceModel.set_rope_fp32(True)` which iterates all 36 layers.
+        # Default: False (preserves legacy behavior).
+        self._rope_fp32 = False
+
     def __call__(
         self,
         x: mx.array,                       # (B, L, D)
@@ -188,13 +198,27 @@ class LanceMoTAttention(Attention):
         else:
             kv_seq_len += (cache.offset + 1) if cache is not None else 0
 
-        cos, sin = self.rotary_emb(values, position_ids)
-
         if mask is not None and isinstance(mask, mx.array):
             mask = mask[..., : keys.shape[-2]]
-        queries, keys = apply_multimodal_rotary_pos_emb(
-            queries, keys, cos, sin, unqueeze_dim=1
-        )
+
+        if self._rope_fp32:
+            # P0a: pass fp32 dummy to rotary_emb so its `cos.astype(x.dtype)`
+            # downcast at language.py:73 becomes a no-op fp32→fp32. Then upcast
+            # q/k to fp32 for the rotation arithmetic and downcast result back.
+            values_fp32 = values.astype(mx.float32)
+            cos, sin = self.rotary_emb(values_fp32, position_ids)  # both fp32
+            q_fp32 = queries.astype(mx.float32)
+            k_fp32 = keys.astype(mx.float32)
+            q_rot, k_rot = apply_multimodal_rotary_pos_emb(
+                q_fp32, k_fp32, cos, sin, unqueeze_dim=1
+            )
+            queries = q_rot.astype(queries.dtype)
+            keys = k_rot.astype(keys.dtype)
+        else:
+            cos, sin = self.rotary_emb(values, position_ids)
+            queries, keys = apply_multimodal_rotary_pos_emb(
+                queries, keys, cos, sin, unqueeze_dim=1
+            )
 
         if cache is not None:
             keys, values = cache.update_and_fetch(keys, values)
@@ -338,6 +362,20 @@ class LanceModel(nn.Module):
         self.latent_pos_embed = LatentPosEmbed(num_positions=num_latent_positions, hidden_size=args.hidden_size)
         self.time_embedder    = TimestepEmbedder(hidden_size=args.hidden_size)
         self.llm2vae          = FlowHead(hidden_size=args.hidden_size, latent_channels=48)
+
+    # ----- Phase 5g (issue #2 P0a) — runtime RoPE precision toggle ----------
+    def set_rope_fp32(self, enabled: bool) -> None:
+        """Toggle fp32 RoPE rotation across all 36 LanceMoTAttention modules.
+
+        When True, each LanceMoTAttention computes cos/sin and applies the
+        rotation `q*cos + rotate_half(q)*sin` in fp32 instead of inheriting
+        mlx-vlm's bf16 downcast at `qwen2_5_vl/language.py:73`. This is the
+        P0a candidate from the Phase 5e research brief — hypothesized to
+        recover high-frequency precision in the flow-matching velocity field
+        (manifests as soft water/fur/paws when off).
+        """
+        for layer in self.layers:
+            layer.self_attn._rope_fp32 = bool(enabled)
 
     def __call__(
         self,

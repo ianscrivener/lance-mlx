@@ -163,6 +163,8 @@ class TextToVideoPipeline:
         instruction: str = T2V_INSTRUCTION,
         mape_anchor: int | None = None,
         cfg_uncond_mode: str = "empty_prompt",
+        spatial_merge_size: int = 1,
+        rope_fp32: bool = False,
     ) -> mx.array:
         """`mape_anchor`: temporal-anchor value for latent t-axis positions.
         **Default changed to None on 2026-05-21** after Phase 5d scale bisect
@@ -190,12 +192,29 @@ class TextToVideoPipeline:
         is "with text vs no text at all" rather than "with prompt vs empty
         prompt"; the latter under-amplifies fine-detail features. **Candidate 3
         in issue #2.**
+
+        `spatial_merge_size`: divisor for h/w axes in `_build_position_ids`'s
+        latent grid. Default `1` (legacy). Set to `2` to match upstream Lance's
+        `data/common.py::shift_position_ids` and RockTalk's parallel MLX port
+        (both divide visual position-ids by spatial_merge_size=2). **P0b
+        candidate from issue #2 / Phase 5g research brief.**
+
+        `rope_fp32`: when True, compute cos/sin and the
+        `q*cos + rotate_half(q)*sin` rotation in fp32 across all 36 attention
+        layers (mlx-vlm's stock path casts cos/sin to bf16 at
+        `qwen2_5_vl/language.py:73` before the rotation). Default False
+        (legacy bf16 path). **P0a candidate from issue #2 / Phase 5g.**
         """
         if cfg_interval is None:
             # Legacy behavior: CFG at every step. Effectively cfg_interval=[-inf, +inf].
             cfg_lo, cfg_hi = float("-inf"), float("inf")
         else:
             cfg_lo, cfg_hi = float(cfg_interval[0]), float(cfg_interval[1])
+
+        # P0a (issue #2 / Phase 5g) — fp32 RoPE rotation in all 36 attention layers.
+        # Default off (legacy bf16 path); set True to test the research-brief
+        # candidate that bf16 rotation perturbs flow-matching velocity precision.
+        self.lance_model.set_rope_fp32(bool(rope_fp32))
         """Generate a video as (T_decoded, H, W, 3) uint8-compatible mx.array.
 
         Caller is responsible for encoding to MP4 (see scripts/10_t2v_demo.py
@@ -223,6 +242,7 @@ class TextToVideoPipeline:
             prompt=prompt, instruction=instruction,
             n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat, verbose=verbose,
             mape_anchor=mape_anchor, uncond_no_text=False,
+            spatial_merge_size=spatial_merge_size,
         )
         if cfg_scale > 1.0:
             uncond_state = self._prepare_state(
@@ -230,6 +250,7 @@ class TextToVideoPipeline:
                 n_lat=n_lat, t_lat=t_lat, h_lat=h_lat, w_lat=w_lat, verbose=False,
                 mape_anchor=mape_anchor,
                 uncond_no_text=(cfg_uncond_mode == "no_text"),
+                spatial_merge_size=spatial_merge_size,
             )
             if verbose:
                 print(f"  CFG enabled, scale={cfg_scale}, mode={cfg_uncond_mode}, "
@@ -335,6 +356,7 @@ class TextToVideoPipeline:
         verbose: bool,
         mape_anchor: int | None = MAPE_ANCHOR_VIDEO_GEN,
         uncond_no_text: bool = False,
+        spatial_merge_size: int = 1,
     ) -> dict:
         """Pack the prompt-dependent state needed for one CFG-arm of the flow.
 
@@ -385,6 +407,7 @@ class TextToVideoPipeline:
             text_len_before_latents=text_len_before_latents,
             latent_positions=latent_positions,
             mape_anchor=mape_anchor,
+            spatial_merge_size=spatial_merge_size,
         )
 
         position_group = mx.full((T,), int(PositionGroup.TEXT), dtype=mx.int32)
@@ -487,16 +510,24 @@ class TextToVideoPipeline:
         text_len_before_latents: int,
         latent_positions: list[int],
         mape_anchor: int | None = MAPE_ANCHOR_VIDEO_GEN,
+        spatial_merge_size: int = 1,
     ) -> mx.array:
         """Build (3, 1, T) position_ids with 3D grid for latent positions.
 
         Layout: latent token i (in flat row-major (t, h, w) order) gets:
           - t-axis: text_len + frame_idx     (BEFORE MaPE shift)
-          - h-axis: text_len + row_idx
-          - w-axis: text_len + col_idx
+          - h-axis: text_len + (row_idx // spatial_merge_size)
+          - w-axis: text_len + (col_idx // spatial_merge_size)
         Then MaPE re-anchors the t-axis of latent positions:
           - shift = 2000 - first_latent_t_axis_position  (modality 3 = video_gen)
           - applied uniformly to all latent positions
+
+        `spatial_merge_size`: divisor for h/w axes (P0b candidate from issue #2).
+        Default `1` = no merging (legacy). Upstream Qwen2.5-VL convention is
+        `sms=2` (see `data/common.py::shift_position_ids`). RockTalk's parallel
+        MLX port also uses `sms=2`. Setting to 2 halves the spatial position-id
+        spread, which matches the trained mrope convention for visual tokens
+        and may close residual fine-detail gap on water/textures.
         """
         import numpy as np
         pos = np.zeros((3, 1, T), dtype=np.int32)
@@ -505,17 +536,18 @@ class TextToVideoPipeline:
         pos[1, 0, :] = seq
         pos[2, 0, :] = seq
 
+        sms = max(1, int(spatial_merge_size))
         base = text_len_before_latents
         for idx, token_pos in enumerate(latent_positions):
             f = idx // (h_lat * w_lat)
             r = (idx % (h_lat * w_lat)) // w_lat
             c = (idx % (h_lat * w_lat)) % w_lat
             pos[0, 0, token_pos] = base + f
-            pos[1, 0, token_pos] = base + r
-            pos[2, 0, token_pos] = base + c
+            pos[1, 0, token_pos] = base + (r // sms)
+            pos[2, 0, token_pos] = base + (c // sms)
 
         # Tokens after the latent block (vision_end) continue from the max.
-        max_grid = max(t_lat, h_lat, w_lat) - 1
+        max_grid = max(t_lat - 1, (h_lat - 1) // sms, (w_lat - 1) // sms)
         after_latents_start = latent_positions[-1] + 1
         if after_latents_start < T:
             tail_len = T - after_latents_start
