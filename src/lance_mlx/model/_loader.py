@@ -85,18 +85,26 @@ def load_lance_model(lance_weights_dir: Path | str) -> LanceModel:
     quant = cfg.get("quantization")
     if quant is not None and "bits" in quant and "group_size" in quant:
         # Apply same quantization the saved weights were created with.
-        skip_gen = bool(quant.get("skip_gen_tower", False))
-        skip_pred = _build_skip_predicate(skip_gen)
+        # **Weight-file-aware predicate** (mirrors mlx_vlm/utils.py:349):
+        # only quantize modules whose `.scales` key actually exists in the
+        # saved weights. This avoids the static-skip-pattern bug where the
+        # load-time predicate could disagree with the save-time predicate
+        # (e.g. when a module's dimensions are/aren't divisible by group_size,
+        # or when the LanceMoTAttention's GEN-side projections are/aren't
+        # included). Disagreement silently corrupts modules — visible as
+        # vertical-stripe artifacts in t2i.
+        def class_predicate(path: str, m: nn.Module) -> bool:
+            if not hasattr(m, "to_quantized"):
+                return False
+            if hasattr(m, "weight") and m.weight.size % quant["group_size"] != 0:
+                return False
+            return f"{path}.scales" in saved
         nn.quantize(
             model,
             group_size=quant["group_size"],
             bits=quant["bits"],
             mode=quant.get("mode", "affine"),
-            class_predicate=lambda path, m: (
-                hasattr(m, "to_quantized")
-                and m.weight.shape[-1] % quant["group_size"] == 0
-                and skip_pred(path, m)
-            ),
+            class_predicate=class_predicate,
         )
 
     model.load_weights(list(saved.items()))
