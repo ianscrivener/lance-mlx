@@ -92,7 +92,15 @@ def main() -> int:
     print(f"\n=== Remapping keys + casting F32 → bf16 ===")
     out: dict[str, mx.array] = {}
     collisions = 0
+    skipped_vit = 0
     for k, v in src.items():
+        # RT bundles ViT inside model.safetensors AS WELL AS in vit.safetensors.
+        # Our LanceModel only loads the LLM block; ViT lives in a separate
+        # mlx-vlm submodule loaded by understanding.py. Skip ViT keys here so
+        # load_lance_model(..., strict=True) doesn't error on unused tensors.
+        if k.startswith("vit_model.") or k.startswith("vision_model."):
+            skipped_vit += 1
+            continue
         new_k = remap_key(k)
         if new_k in out:
             print(f"  WARNING: key collision {new_k}")
@@ -102,7 +110,7 @@ def main() -> int:
             out[new_k] = v.astype(mx.bfloat16)
         else:
             out[new_k] = v
-    print(f"  remapped {len(out)} tensors ({collisions} collisions)")
+    print(f"  remapped {len(out)} tensors ({collisions} collisions, skipped {skipped_vit} ViT keys)")
 
     print(f"\n=== Writing remapped model.safetensors ===")
     t0 = time.perf_counter()
@@ -155,6 +163,7 @@ def main() -> int:
         ],
         "n_tensors_in": len(src),
         "n_tensors_out": len(out),
+        "n_vit_skipped": skipped_vit,
     }
     (args.out_dir / "remap_report.json").write_text(json.dumps(report, indent=2))
     print(f"\n✓ Done. Output: {args.out_dir}")
