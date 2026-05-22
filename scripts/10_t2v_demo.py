@@ -39,6 +39,20 @@ def main() -> int:
     ap.add_argument("--fps", type=int, default=12,
                     help="Output MP4 fps. Lance default is 12.")
     ap.add_argument("--verbose", action="store_true")
+    # Phase 5g research-brief candidates (github issue #2):
+    ap.add_argument("--spatial-merge-size", type=int, default=1,
+                    help="P0b: divisor for h/w axes in latent position-id grid. "
+                         "Default 1 (legacy). Set to 2 to match upstream Lance's "
+                         "`shift_position_ids` and RockTalk's parallel MLX port "
+                         "(both divide visual position-ids by spatial_merge_size=2).")
+    ap.add_argument("--rope-fp32", action="store_true",
+                    help="P0a: compute cos/sin and the q*cos+rotate_half(q)*sin "
+                         "rotation in fp32 (mlx-vlm's stock path casts cos/sin to "
+                         "bf16 before rotation). Hypothesized to recover "
+                         "high-frequency precision in flow-matching velocity.")
+    ap.add_argument("--mape-anchor", type=int, default=None,
+                    help="Override MaPE temporal anchor (default None = no shift, "
+                         "per Phase 5d). Pass 2000 to restore legacy behavior.")
     args = ap.parse_args()
 
     print(f"=== Loading TextToVideoPipeline ===")
@@ -55,11 +69,17 @@ def main() -> int:
     print(f"  {args.num_frames}f × {args.width}x{args.height}, "
           f"{args.steps} steps, cfg={args.cfg_scale}, seed={args.seed}")
     t0 = time.perf_counter()
+    if args.verbose:
+        print(f"  phase 5g flags: sms={args.spatial_merge_size}, "
+              f"rope_fp32={args.rope_fp32}, mape_anchor={args.mape_anchor}")
     frames = pipe.generate(
         args.prompt,
         num_frames=args.num_frames, height=args.height, width=args.width,
         num_steps=args.steps, cfg_scale=args.cfg_scale,
         seed=args.seed, verbose=args.verbose,
+        spatial_merge_size=args.spatial_merge_size,
+        rope_fp32=args.rope_fp32,
+        mape_anchor=args.mape_anchor,
     )
     t1 = time.perf_counter()
     print(f"  generated {frames.shape[0]} decoded frames in {t1-t0:.1f}s")
