@@ -154,6 +154,7 @@ class TextToImagePipeline:
         seed: int = 42,
         verbose: bool = False,
         instruction: str = T2I_INSTRUCTION,
+        latent_pos_base: int | None = None,
     ) -> Image.Image:
         """Generate a single image from a text prompt.
 
@@ -188,11 +189,13 @@ class TextToImagePipeline:
         cond_state = self._prepare_state(
             prompt=prompt, instruction=instruction,
             n_lat=n_lat, h_lat=h_lat, w_lat=w_lat, verbose=verbose,
+            latent_pos_base=latent_pos_base,
         )
         if cfg_scale > 1.0:
             uncond_state = self._prepare_state(
                 prompt="", instruction=instruction,
                 n_lat=n_lat, h_lat=h_lat, w_lat=w_lat, verbose=False,
+                latent_pos_base=latent_pos_base,
             )
             if verbose:
                 print(f"  CFG enabled, scale={cfg_scale}, "
@@ -294,6 +297,7 @@ class TextToImagePipeline:
         h_lat: int,
         w_lat: int,
         verbose: bool,
+        latent_pos_base: int | None = None,
     ) -> dict:
         """Pack the prompt-dependent state needed for one CFG-arm of the flow.
 
@@ -334,6 +338,7 @@ class TextToImagePipeline:
             T=T, n_lat=n_lat, h_lat=h_lat, w_lat=w_lat,
             text_len_before_latents=text_len_before_latents,
             latent_positions=latent_positions,
+            latent_pos_base=latent_pos_base,
         )
 
         position_group = mx.full((T,), int(PositionGroup.TEXT), dtype=mx.int32)
@@ -477,6 +482,7 @@ class TextToImagePipeline:
         w_lat: int,
         text_len_before_latents: int,
         latent_positions: list[int],
+        latent_pos_base: int | None = None,
     ) -> mx.array:
         """Build (3, 1, T) position_ids with text + 3D latent grid + MaPE re-anchor.
 
@@ -487,6 +493,15 @@ class TextToImagePipeline:
             text_len_before_latents.
 
         Then apply MaPE: temporal axis of latent positions → all anchored to 1000.
+
+        `latent_pos_base`: experimental hook mirroring t2v.py Phase 5j.
+        **Default is `None` (legacy = text-position anchor at
+        `text_len_before_latents`) — production-validated since Phase 3e.**
+        Setting to `0` anchors latent grid at origin (matches t2v.py's
+        Phase 5j fix convention). t2i has a single trailing latent block
+        like t2v, so this is a safe experimental hook. Whether it improves
+        output for image generation is an open question — t2i has been
+        producing photoreal output with the legacy default for months.
         """
         import numpy as np
         pos = np.zeros((3, 1, T), dtype=np.int32)
@@ -498,8 +513,9 @@ class TextToImagePipeline:
         pos[2, 0, :] = seq
 
         # Override at latent positions with 3D grid (t=0, h=row, w=col).
-        # The temporal axis starts at text_len_before_latents (before MaPE).
-        base = text_len_before_latents
+        # The anchor: either text_len_before_latents (legacy) or fixed
+        # origin (Phase 5j-style).
+        base = text_len_before_latents if latent_pos_base is None else int(latent_pos_base)
         for idx, token_pos in enumerate(latent_positions):
             r = idx // w_lat
             c = idx % w_lat
