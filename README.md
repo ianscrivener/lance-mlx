@@ -13,11 +13,11 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 | [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` (full quality, ~15 GB) |
 | [`mlx-community/Lance-3B-8bit`](https://huggingface.co/mlx-community/Lance-3B-8bit) | 🟢 Production | Same as above, **2.7× faster, 16 GB Mac-friendly** (~9 GB) |
 | [`mlx-community/Wan2.2-VAE-Lance-bf16`](https://huggingface.co/mlx-community/Wan2.2-VAE-Lance-bf16) | 🟢 Production | 48-ch Wan2.2 VAE (standalone, shared by image + video pipelines) |
-| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Functional | `t2v` (painterly aesthetic by design), `x2t_video`, `video_edit` |
+| [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Production | `t2v` (photoreal after Phase 5j fix, 2026-05-21), `x2t_video`, `video_edit` |
 
 ## Status
 
-🟢 **Image production-quality; video greatly improved but not at full PyTorch-reference parity (2026-05-21).** Image pipelines (t2i, image_edit, x2t_image) reproduce the bf16 PyTorch reference. Video pipelines (t2v, video_edit, x2t_video) **just landed the Phase 5d MaPE-shift port-bug fix** — output went from painterly-impressionistic to photorealistic-3D-cinematic at scales up to ~768²×13f (n_lat ≤ 9,216). However, a residual fine-detail gap remains — water, fine textures, and very-high-n_lat outputs still degrade vs the PyTorch oracle. **Active deep-research engagement on what's left** — see the [open research request (issue #3)](https://github.com/xocialize/lance-mlx/issues/3) and the [full handoff doc](./notes/phase5e_research_brief.md). The technical debug tracker is [issue #2](https://github.com/xocialize/lance-mlx/issues/2). The oracle data confirms the model itself can produce full photorealism; the remaining gap is in our port, not the model.
+🟢 **Image and video both production-quality (2026-05-21).** Image pipelines (t2i, image_edit, x2t_image) reproduce the bf16 PyTorch reference. Video pipelines (t2v, video_edit, x2t_video) just landed the **Phase 5j position-ID fix** — output is now photoreal/CGI-quality at all scales up to n_lat ≈ 9,216 (256² – 768²×13f, 480×704×17f). Root cause was a port-side bug in `_build_position_ids`: the latent block's mrope grid was anchored to `text_len_before_latents` instead of grid origin, so visual tokens drifted with prompt length out of Qwen2.5-VL's training distribution and smeared into watercolor. Fix: `latent_pos_base=0`. [GitHub issue #2](https://github.com/xocialize/lance-mlx/issues/2) closed; full root-cause analysis in [`notes/phase5j_THE_FIX.md`](./notes/phase5j_THE_FIX.md). The very-high-n_lat ceiling (768²×≥17f) remains a separate bug tracked as [issue #1](https://github.com/xocialize/lance-mlx/issues/1).
 
 | Capability | Status |
 |---|---|
@@ -27,7 +27,7 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 | KV cache for fast autoregressive decode | ✅ 1.7×–2.8× speedup on long generations |
 | **t2i (text → image generation)** | **✅ Production. Photorealistic, prompt-aligned output.** |
 | **image_edit (instruction-based)** | **✅ Production. "Remove hat" preserves identity + style + signature; "Add pearl necklace" leaves rest intact.** |
-| **t2v (text → video)** | 🟡 **Photoreal subject + composition** at n_lat ≤ 9,216 (256–768² × ≤13f; 480×704×17f). Phase 5d MaPE fix landed. Residual fine-detail gap vs PyTorch oracle in water/textures/paws — under active investigation ([issue #2](https://github.com/xocialize/lance-mlx/issues/2), [research brief](./notes/phase5e_research_brief.md)). ⚠️ Degrades at very high n_lat (768²×17f+). |
+| **t2v (text → video)** | ✅ **Production. Photoreal/CGI-quality output** at n_lat ≤ 9,216 (256–768² × ≤13f; 480×704×17f) after Phase 5j position-ID fix (2026-05-21). Red panda + horizontally-oriented surfboard + water spray + atmospheric clouds; no painterly residue. ⚠️ Degrades at very high n_lat (768²×17f+, [issue #1](https://github.com/xocialize/lance-mlx/issues/1)). |
 | **x2t_video (video VQA)** | **✅ Validated against Phase 0 oracle.** Cooking video → kitchen+pan+spatula+tomato+meat all content-correct in 17.5 s. |
 | **video_edit (instruction-based)** | ✅ Same envelope as t2v: works at ≤9,216 latent tokens after Phase 5d fix. |
 | 8-bit + 4-bit quants + HF community variants | ⏳ Phase 5b |
