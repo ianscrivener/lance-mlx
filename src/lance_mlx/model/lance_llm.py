@@ -152,12 +152,17 @@ class LanceMoTAttention(Attention):
         # P0a candidate (issue #2 / Phase 5g): when True, compute cos/sin and
         # the q*cos + rotate_half(q)*sin rotation in fp32 instead of inheriting
         # mlx-vlm's `Qwen2RotaryEmbedding`'s downcast (language.py:73 does
-        # `cos.astype(x.dtype)` → bf16 in our run). Hypothesis: bf16 rotation
-        # error perturbs high-frequency channels of the flow-matching velocity
-        # field, manifesting as soft water/fur/paws. Set via
-        # `LanceModel.set_rope_fp32(True)` which iterates all 36 layers.
-        # Default: False (preserves legacy behavior).
+        # `cos.astype(x.dtype)` → bf16 in our run). Default: False (preserves
+        # legacy behavior).
         self._rope_fp32 = False
+
+        # Phase 5m / Issue #1: when True, promote Q/K/V to fp32 through the
+        # entire RoPE + SDP path (downcast before o_proj). Hypothesis: at long
+        # sequence lengths (n_lat ≥ 11,520) bf16 attention accumulation
+        # produces silent semantic drift. Independent of _rope_fp32 (which
+        # downcasts before SDP). Set via `LanceModel.set_attention_fp32(True)`.
+        # Default: False.
+        self._attention_fp32 = False
 
     def __call__(
         self,
@@ -201,19 +206,37 @@ class LanceMoTAttention(Attention):
         if mask is not None and isinstance(mask, mx.array):
             mask = mask[..., : keys.shape[-2]]
 
-        if self._rope_fp32:
-            # P0a: pass fp32 dummy to rotary_emb so its `cos.astype(x.dtype)`
-            # downcast at language.py:73 becomes a no-op fp32→fp32. Then upcast
-            # q/k to fp32 for the rotation arithmetic and downcast result back.
+        # Issue #1 / Phase 5m: attention_fp32 promotes Q/K/V to fp32 through
+        # the entire RoPE + SDP path, downcasting only before o_proj. At long
+        # sequence lengths (n_lat ≥ 11,520 e.g. 768²×17f) bf16 softmax
+        # accumulation in SDP can produce silent semantic drift even when
+        # latent stats are numerically bounded. fp32 attention is a candidate
+        # mitigation. Independent of `_rope_fp32` (which only upcasts the
+        # rotary calc and downcasts back before SDP).
+        original_q_dtype = queries.dtype
+        if self._attention_fp32:
             values_fp32 = values.astype(mx.float32)
-            cos, sin = self.rotary_emb(values_fp32, position_ids)  # both fp32
+            cos, sin = self.rotary_emb(values_fp32, position_ids)
             q_fp32 = queries.astype(mx.float32)
             k_fp32 = keys.astype(mx.float32)
             q_rot, k_rot = apply_multimodal_rotary_pos_emb(
                 q_fp32, k_fp32, cos, sin, unqueeze_dim=1
             )
-            queries = q_rot.astype(queries.dtype)
-            keys = k_rot.astype(keys.dtype)
+            # KEEP fp32 through SDP — do NOT downcast q/k/v before SDP call
+            queries = q_rot
+            keys = k_rot
+            values = values_fp32
+        elif self._rope_fp32:
+            # P0a (Phase 5g): fp32 RoPE rotation only — downcast before SDP.
+            values_fp32 = values.astype(mx.float32)
+            cos, sin = self.rotary_emb(values_fp32, position_ids)
+            q_fp32 = queries.astype(mx.float32)
+            k_fp32 = keys.astype(mx.float32)
+            q_rot, k_rot = apply_multimodal_rotary_pos_emb(
+                q_fp32, k_fp32, cos, sin, unqueeze_dim=1
+            )
+            queries = q_rot.astype(original_q_dtype)
+            keys = k_rot.astype(original_q_dtype)
         else:
             cos, sin = self.rotary_emb(values, position_ids)
             queries, keys = apply_multimodal_rotary_pos_emb(
@@ -228,6 +251,10 @@ class LanceMoTAttention(Attention):
             queries, keys, values, cache, scale=self.scale, mask=mask
         )
         output = output.transpose(0, 2, 1, 3).reshape(B, L, -1)
+
+        # Downcast back if we promoted to fp32 (o_proj weights are bf16).
+        if self._attention_fp32 and output.dtype != original_q_dtype:
+            output = output.astype(original_q_dtype)
 
         # --- Per-expert output projection (both paths, merged) -------------------
         return mx.where(gen_mask, self.o_proj_moe_gen(output), self.o_proj(output))
@@ -376,6 +403,21 @@ class LanceModel(nn.Module):
         """
         for layer in self.layers:
             layer.self_attn._rope_fp32 = bool(enabled)
+
+    # ----- Phase 5m (issue #1) — runtime attention precision toggle ----------
+    def set_attention_fp32(self, enabled: bool) -> None:
+        """Toggle fp32 attention (Q/K/V through RoPE + SDP) across all 36
+        LanceMoTAttention modules.
+
+        When True, Q/K/V are promoted to fp32 before RoPE rotation and stay
+        in fp32 through `scaled_dot_product_attention`; output is downcast
+        before o_proj. Hypothesized fix for issue #1 silent semantic drift at
+        n_lat ≥ 11,520 (768²×17f+) where bf16 attention accumulation degrades
+        output without numerical blowup. Independent of `_rope_fp32` (which
+        downcasts before SDP).
+        """
+        for layer in self.layers:
+            layer.self_attn._attention_fp32 = bool(enabled)
 
     def __call__(
         self,

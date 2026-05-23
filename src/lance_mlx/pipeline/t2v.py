@@ -165,6 +165,7 @@ class TextToVideoPipeline:
         cfg_uncond_mode: str = "empty_prompt",
         spatial_merge_size: int = 1,
         rope_fp32: bool = False,
+        attention_fp32: bool = False,
         prompt_format: str = "ours",
         latent_pos_base: int | None = 0,
     ) -> mx.array:
@@ -230,6 +231,7 @@ class TextToVideoPipeline:
         # Default off (legacy bf16 path); set True to test the research-brief
         # candidate that bf16 rotation perturbs flow-matching velocity precision.
         self.lance_model.set_rope_fp32(bool(rope_fp32))
+        self.lance_model.set_attention_fp32(bool(attention_fp32))
         """Generate a video as (T_decoded, H, W, 3) uint8-compatible mx.array.
 
         Caller is responsible for encoding to MP4 (see scripts/10_t2v_demo.py
