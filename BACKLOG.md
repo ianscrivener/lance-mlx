@@ -57,10 +57,12 @@ mlx_lm.dwq --model Lance_3B_Video \
     --mlx-path Lance_3B_Video-MLX-4bit-DWQ \
     --bits 4 --group-size 64 --num-samples 256
 ```
-Reza2kn dropped `qk_norm` weights to fit mlx-lm's stock `qwen2` class. **Our
-port carries qk_norms in `LanceMoTAttention` natively** — same DWQ recipe
-should yield strictly better quality at the same bit budget. (Differentiator
-for any future publish.)
+Reza2kn drops `qk_norm` only in `extract_und_to_qwen.py` (the UND-only
+repackaging step that forces Lance into stock mlx-lm's `qwen2` class).
+Their AWQ pipeline ITSELF preserves qk_norms (the AWQ `FUSION_GROUPS`
+touch `input_layernorm` + `post_attention_layernorm` only, not the qk
+norms inside attention). So no qk_norm-parity advantage for us at the
+AWQ stage — both pipelines are equivalent here.
 
 *Generation path (4-bit) — needs activation-aware calibration:*
 `Reza2kn/Lance-3B-Video-AWQ-INT4` (sibling repo, custom AWQ outside
@@ -92,10 +94,40 @@ we sidestep this in MLX via `mx.fast.quantized_matmul`.
 5. **Always gate on bf16 oracle parity first** (optimize bf16, then quantize) —
    quantizing a still-buggy baseline wastes calibration effort.
 
-**Open question:** Reza2kn's AWQ doesn't mention qk_norm handling at all.
-For step 3, our preserved qk_norms might interact with the alpha-search
-fusion logic in non-obvious ways. Worth a small isolated test before
-committing.
+**Algorithm pinned (from `scripts/awq_apply.py` source, master branch):**
+
+```python
+# Per fusion group:
+#   group ∈ {(input_layernorm, [q_proj, k_proj, v_proj]),
+#            (input_layernorm_moe_gen, [q/k/v_proj_moe_gen]),
+#            (post_attention_layernorm, [mlp.gate_proj, mlp.up_proj]),
+#            (post_attention_layernorm_moe_gen, [mlp_moe_gen.gate_proj, .up_proj])}
+#
+# 1. act_mean = per-channel mean(|activations|), averaged across consumers
+# 2. w_max   = per-channel max(|weight|), averaged across consumers
+# 3. for alpha in {0/20, 1/20, ..., 20/20}:
+#        s = (act_mean^alpha / w_max^(1-alpha)).clamp(min=1e-5)
+#        s = s / sqrt(s.max() * s.min())                 # geomean ≈ 1
+#        x = randn(512, in_features) * act_mean          # synthetic input
+#        for w in consumers:
+#            w_scaled    = w * s.unsqueeze(0)
+#            w_dequant   = quant->dequant per-group asym INT4(w_scaled)
+#            err        += mean((x/s @ w_dequant.T - x @ w.T)^2)
+#        track best alpha by err
+# 4. norm.weight        /= s                             # absorb into preceding norm
+#    consumer.weight    *= s.unsqueeze(0)                # per-column scale
+# 5. quantize_per_group(consumer.weight, n_bit=4, group_size=128)
+#
+# Non-fused: o_proj, o_proj_moe_gen, mlp.down_proj, mlp_moe_gen.down_proj
+#   → plain per-group asymmetric INT4 (no AWQ).
+#
+# lm_head: kept in bf16. "inference_lance asserts on its .weight pointer."
+```
+
+MLX-native port should be ~100 LOC: `mx.fast.quantized_matmul` already
+provides the asymmetric per-group quant kernel, so we'd only need the
+alpha-search loop + scale-fusion. No PyTorch dequant overhead → no ~10×
+slowdown problem.
 
 **Benefit:** Lance-3B on 16 GB Macs (currently borderline-OOM in bf16),
 and ~2-3× inference speedup. Significant user-base expansion to the
