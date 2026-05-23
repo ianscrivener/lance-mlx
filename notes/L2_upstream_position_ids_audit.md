@@ -221,3 +221,102 @@ Files cross-referenced in this follow-up:
 - V0 md5: `45631d9f8b6254e2d73b74572149aa4b`
 - V1 md5: `4c5d6c6bd23b8e9dc7cd305d9bb81593`
 - V2 md5: `b872b56b0196ba056167bda656edf270`
+
+---
+
+## Issue #1 follow-up hypothesis tests (2026-05-22)
+
+After Phase 5j fix landed, issue #1 (n_lat ceiling at 768²×≥17f) was
+re-characterized: no longer a hard cliff (watercolor / pure noise), now
+a **gradual quality decay** at t_lat≥5. Latent stats remain numerically
+bounded (mean ~0, std 0.7-1.0, no NaN/inf), so the bug is **silent
+semantic drift** — the model produces nominally-valid values that encode
+lower-fidelity content.
+
+### H1: bf16 attention accumulation — REJECTED
+
+Added `_attention_fp32` flag to `LanceMoTAttention` that promotes Q/K/V
+to fp32 through RoPE + SDP, downcasting only before o_proj. Tested at
+768²×17f (t_lat=5, n_lat=11520) with seed=43:
+
+- bf16 baseline midframe md5: `41fcdb22f9301f6335de8cefa1785f0a`
+- attention_fp32=True midframe md5: `41fcdb22f9301f6335de8cefa1785f0a`
+- **BYTE-IDENTICAL.**
+
+Per MLX 0.31.2 spec (`mx.fast.scaled_dot_product_attention`): "The
+softmax operation is performed in float32 regardless of the input
+precision." So promoting Q/K/V to fp32 BEFORE the SDP call provides
+ZERO additional precision — the precision-critical math was already
+running in fp32 internally.
+
+Conclusion: bf16 attention accumulation is NOT the silent-drift cause.
+Flag stays in tree as a documented null result.
+
+### H2: LPE undertraining at higher frame indices — REJECTED
+
+Static analysis of Lance_3B_Video's 126,976-entry `latent_pos_embed.pos_embed`
+table (31 frames × 64 × 64 × 2048):
+
+| Frame range | row_l2_mean | ratio vs 0-3 |
+|---|---|---|
+| 0-3   | 32.0025 | (baseline) |
+| 4-7   | 32.0024 | 1.000× |
+| 8-30  | 32.0026 | 1.000× |
+
+All 31 frame slots have UNIFORM statistics (0.002% variation). Plus
+`max_abs=1.0000` exactly every frame. The pattern strongly implies a
+**sinusoidal positional embedding** (constructed at init, not learned),
+so the "higher-frame entries are undertrained" hypothesis is
+structurally impossible.
+
+### Remaining open hypotheses
+
+| H | Description | Status |
+|---|---|---|
+| H3 | CFG renorm at higher token counts | not yet tested (~16 min t2v rerun) |
+| H4 | bf16 Linear projection accumulation | hard to test cheaply; matmul kernels likely fp32-accumulate already |
+| H5 | Mask shape interaction at long sequences | static-inspectable; not yet looked |
+| H6 | Sampler/scheduler edge case at higher t_lat | static; need to check |
+| H7+ | Something else architectural | undirected |
+
+### Variable-split diagnostic (in progress)
+
+Question: is the bug triggered by **n_lat magnitude** (total token count)
+or **t_lat** (frame count)? Running t_lat=5 at 512² (n_lat=5120, far
+below the cliff) to split the variable. If clean → n_lat-magnitude is
+the lever (attention dilution, CFG renorm scale effects). If degraded
+→ t_lat itself is the trigger (adding a 5th latent frame breaks
+something specific to that boundary).
+
+### Variable-split result (2026-05-22) — n_lat magnitude, not t_lat
+
+Ran t_lat=5 at 512² (n_lat=5,120, well below the cliff at 11,520). Output
+is **clean**: production-quality red panda, detailed fur, crisp hat,
+visible satchel detail. Same t_lat=5 as the regressed 768²×17f case but
+at lower n_lat.
+
+| Test | n_lat | t_lat | Result |
+|---|---|---|---|
+| 768²×13f | 9,216 | 4 | Photoreal ✓ (baseline) |
+| 768²×17f | 11,520 | 5 | Regressed (silent decay) |
+| **512²×17f** | **5,120** | **5** | **Clean ✓** |
+
+Latent trajectories are nearly identical between the two t_lat=5 scales
+— same mean (~0) and std evolution (0.99 → 0.86). Numerical health is
+preserved; the silent drift is somewhere LLM-output-to-VAE-decode.
+
+**The n_lat ceiling is total-token-count dependent**, NOT triggered by
+adding a 5th latent frame. This rules out:
+- Temporal-axis-specific bugs (mask edge case at t_lat=5+, frame-index
+  LPE quality, mrope t-axis handling specific to longer clips)
+
+And points to **sequence-length effects**:
+- Softmax attention dilution at long seq (each query attends to ~2× more
+  keys, softmax becomes flatter — could reduce semantic precision)
+- CFG renorm L2 norm computed over ~2× more elements (renorm scale may
+  trigger differently)
+- MLX kernel selection threshold at L > ~9000 (different code path
+  dispatched at certain sizes)
+
+The cliff crosses somewhere in n_lat ∈ [5,120, 11,520]. A finer bisect
+(e.g. 640²×17f at n_lat=8,000) could narrow it further.
