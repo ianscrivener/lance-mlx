@@ -155,7 +155,15 @@ class TextToVideoPipeline:
         num_steps: int = 30,
         timestep_shift: float = 3.5,
         cfg_scale: float = 4.0,
-        cfg_renorm_type: str = "global",
+        cfg_renorm_type: str = "channel",  # Phase 5m fix: changed from 'global' to 'channel'.
+                                          # Resolves Issue #1 — 'global' computes scalar L2 over
+                                          # the full velocity tensor; at high n_lat (e.g. 768²×17f,
+                                          # n_lat=11520) the L2 cap silently over-suppresses
+                                          # high-frequency detail. 'channel' computes per-channel
+                                          # L2 so pathological channels clamp without dragging
+                                          # the aggregate signal down. Equivalent at small scales
+                                          # (768²×13f production-validated). Pass 'global' to
+                                          # restore legacy default.
         cfg_renorm_min: float = 0.0,
         cfg_interval: tuple[float, float] | None = None,
         seed: int = 42,

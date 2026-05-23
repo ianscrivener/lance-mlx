@@ -163,7 +163,7 @@ class VideoEditPipeline:
         num_steps: int = 30,
         timestep_shift: float = 3.5,
         cfg_scale: float = 4.0,
-        cfg_renorm_type: str = "global",
+        cfg_renorm_type: str = "channel",  # Phase 5m default (changed from "global")
         cfg_renorm_min: float = 0.0,
         seed: int = 42,
         verbose: bool = False,

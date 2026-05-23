@@ -149,7 +149,11 @@ class TextToImagePipeline:
         num_steps: int = 30,
         timestep_shift: float = 3.5,
         cfg_scale: float = 4.0,           # 1.0 disables CFG; Lance default 4.0
-        cfg_renorm_type: str = "global",  # "global" | "channel" | "none". Lance default: global.
+        cfg_renorm_type: str = "channel",  # Phase 5m fix: changed from 'global' to 'channel'.
+                                          # 'channel' restores high-frequency detail at high n_lat
+                                          # (768²×17f silent regression closed) without regressing
+                                          # smaller scales (production-validated equivalence at
+                                          # 768²×13f). Pass 'global' to restore legacy default.
         cfg_renorm_min: float = 0.0,      # Lance default: 0.0 (never upscale).
         seed: int = 42,
         verbose: bool = False,

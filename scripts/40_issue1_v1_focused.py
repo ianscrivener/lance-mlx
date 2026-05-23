@@ -33,6 +33,9 @@ def main() -> int:
     ap.add_argument("--width", type=int, default=768)
     ap.add_argument("--num-steps", type=int, default=30)
     ap.add_argument("--cfg", type=float, default=4.0)
+    ap.add_argument("--cfg-renorm-type", type=str, default="global",
+                    choices=["global", "channel", "none"],
+                    help="CFG renorm mode (default 'global' matches t2v.py production default).")
     ap.add_argument("--seed", type=int, default=43)
     ap.add_argument("--out", type=Path, default=Path("/tmp/lance_issue1_v1"))
     ap.add_argument("--prompt", type=str,
@@ -88,6 +91,7 @@ def main() -> int:
             num_frames=args.frames,
             height=args.height, width=args.width,
             num_steps=args.num_steps, cfg_scale=args.cfg,
+            cfg_renorm_type=args.cfg_renorm_type,
             seed=args.seed, verbose=True,
             mape_anchor=None,
         )
