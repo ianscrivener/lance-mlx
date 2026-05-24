@@ -71,15 +71,15 @@ def main() -> int:
     from lance_mlx.pipeline.t2v import TextToVideoPipeline
 
     # Peak memory tracking
-    initial_mem = mx.metal.get_active_memory() / (1024**3)
+    initial_mem = mx.get_active_memory() / (1024**3)
     print(f"  initial active memory: {initial_mem:.2f} GB")
 
     pipe = TextToVideoPipeline.from_pretrained(
         lance_weights_dir=args.lance_weights,
         vae_safetensors=args.vae_weights,
     )
-    post_load_mem = mx.metal.get_active_memory() / (1024**3)
-    peak_mem = mx.metal.get_peak_memory() / (1024**3)
+    post_load_mem = mx.get_active_memory() / (1024**3)
+    peak_mem = mx.get_peak_memory() / (1024**3)
     print(f"  loaded in {time.perf_counter()-t0:.1f}s")
     print(f"  post-load active: {post_load_mem:.2f} GB  peak so far: {peak_mem:.2f} GB")
 
@@ -97,12 +97,12 @@ def main() -> int:
         )
     except Exception as e:
         print(f"\n⚠ GENERATION FAILED: {type(e).__name__}: {e}")
-        peak_after = mx.metal.get_peak_memory() / (1024**3)
+        peak_after = mx.get_peak_memory() / (1024**3)
         print(f"  peak memory at failure: {peak_after:.2f} GB")
         return 1
 
     dt = time.perf_counter() - t0
-    peak_after = mx.metal.get_peak_memory() / (1024**3)
+    peak_after = mx.get_peak_memory() / (1024**3)
     print(f"\n=== Done ===")
     print(f"  generated {video.shape[0]} frames in {dt:.1f}s")
     print(f"  peak memory: {peak_after:.2f} GB")
