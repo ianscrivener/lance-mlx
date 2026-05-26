@@ -67,25 +67,38 @@ quant strategy will need to account for:
 because it's text-only forward through UND (which AWQ helps); image
 generation does not.
 
-### The 5c-3h mystery
+### The 5c-3h finding — investigated and resolved
 
-**AWQ-INT8 ≈ naive 8-bit quality**. At 8-bit precision, the AWQ scale
-rebalancing provides essentially zero benefit, while at 4-bit AWQ
-improves over naive by 3-15 percentage points HF per prompt.
+The "AWQ-INT8 ≈ naive 8-bit at end-to-end quality" observation looked
+like AWQ wasn't helping at 8-bit, but **weight-level introspection
+(Phase 5c-3h, 2026-05-26) shows AWQ IS working per-Linear**, reducing
+output MSE by an average of 28% at 8-bit and 20% at 4-bit. Weight
+MSE goes UP by 20-87% (deliberately, by AWQ's design — it trades
+uniform weight error for outlier-channel output error). Output MSE
+goes DOWN where it matters.
 
-This is the *opposite* of what precision intuition predicts. The
-most likely explanation: at 8-bit, the dominant error budget isn't
-weight quantization — it's either kernel-side activation noise from
-`mx.fast.quantized_matmul`, or Lance's specific activation
-distribution has structure that per-group affine just cannot
-capture regardless of scale.
+**The catch:** middle layers (sampled at layer 18) see AWQ as
+neutral-to-slightly-harmful (+7% to +25% output MSE). Early and late
+layers (0, 35) see -30% to -58%. Net per-layer average is -28%
+improvement, but per-layer gains **don't compound** into end-to-end
+image quality.
 
-If true, **k-quants might or might not help depending on which root
-cause is real**. K_M sub-block scales would help if it's a
-distribution-structure problem; they wouldn't help if it's a kernel
-issue. The Phase 5c-3h research thread (per-layer activation
-diff bf16 vs quantized) would settle which, and is the cheapest
-investment before deciding on k-quants.
+**Why no compounding:** Lance t2i runs 36 layers × 30 Euler steps ×
+2 CFG arms = 2,160 forward-pass evaluations of every Linear per image
+generation. Errors at each step feed into the next step's input via
+the Euler integrator. Per-step quant improvements average out over
+this long path, and the middle-layer AWQ regression actively cancels
+peripheral-layer gains.
+
+**The 80% HF floor is NOT a quant-scheme inadequacy.** It's a
+compounding effect of forward-pass error through Lance's specific
+architecture + the flow-matching integrator. K-quants would face the
+same compounding problem. NVFP4 would face it. Custom Metal kernels
+would face it. **No quant scheme tested or hypothesized would close
+this floor for Lance image generation without changing the
+architecture itself.**
+
+Full writeup: `phase5c3_awq_port/PHASE_5C3H_FINDINGS.md`.
 
 ### Lance's non-LLM components
 
@@ -130,26 +143,41 @@ decision. Don't expect Reza2kn's PyTorch AWQ pipeline to ship the
 qk-norms intact (theirs drops them in an UND-only extraction step);
 ours does.
 
-## Decision rule for mlxEngine
+## Decision rule for mlxEngine (revised post-5c-3h)
 
-Two paths if quant matters more in mlxEngine than it does in
-lance-mlx:
+**Phase 5c-3h closed the k-quants question by showing it doesn't matter.**
+The 80% HF floor isn't caused by any quant scheme's inadequacy at
+the per-Linear level. AWQ already reduces per-layer output MSE by
+28% on average at 8-bit. K-quants would do similar work. None of
+them close the end-to-end gap because **the gap isn't where the
+quant work is happening.**
 
-**Path A — wait for upstream MLX k-quants.** Track
-`mx.fast.quantized_matmul` for Q4_K_M / IQ4 / k-quant landing.
-When they land, our existing `src/lance_mlx/quant/awq.py` machinery
-generalizes: replace `mx.quantize` with whichever new MLX kernel,
-keep the alpha-search + scale fusion. ~1 day of work post-landing.
+Three paths, in order of decreasing expected value:
 
-**Path B — invest in a custom Metal quant kernel for Lance
-specifically.** Multi-week effort. Only worth it if Phase 5c-3h
-research conclusively shows the 80% floor is distribution-structure
-that k-quants would close, AND we have a downstream user that needs
-4-bit Lance image gen at production quality. Currently neither
-condition is met.
+**Path A (default) — ship what we have, don't fight the floor.**
+- bf16 ships t2i / image-edit / x2t_image / t2v at production quality
+- AWQ-INT4 ships compressed VQA (3.31 GB LLM, 6-9× faster decode)
+- Don't invest in new quant schemes; they won't close the t2i gap
 
-Default: **Path A.** AWQ-INT4 ships VQA today; bf16 ships t2i today;
-shipping decisions don't depend on closing the t2i quant gap.
+**Path B — hybrid precision investigation.** If mlxEngine wants
+compressed t2i specifically, the candidate strategy is layer-position
+hybrid: bf16 at semantic-processing middle layers (12-24 maybe),
+AWQ-INT4 at peripheral layers. Phase 5c-3h showed AWQ helps at
+layers 0 and 35 but hurts at layer 18. Empirical layer-by-layer
+analysis would map exactly where to cut bf16 boundaries. Memory
+savings would be partial (~50-60% of bf16 instead of 27%) but
+might preserve t2i quality.
+
+**Path C — step-conditional AWQ calibration.** Re-calibrate AWQ
+scales separately for high-noise vs low-noise denoising timesteps.
+Lance's activation distribution may shift across the 30 Euler steps,
+and a single set of scales averaging across all timesteps may
+under-serve the high-noise early steps where most semantic
+information is laid down. Multi-week effort; speculative value.
+
+**k-quants port is off the table** — Phase 5c-3h shows it wouldn't
+help even if successfully ported. The compounding bottleneck is
+architectural, not algorithmic.
 
 ## See also
 
