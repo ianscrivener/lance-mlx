@@ -51,13 +51,22 @@ SKIP_PATTERNS_ALWAYS = (
     "llm2vae",
 )
 
+# Optional skip — keeps GEN tower (*_moe_gen) at bf16 while quantizing UND.
+# Phase 5c-3g tests whether AWQ-calibrated UND + bf16 GEN preserves t2i
+# quality (where Phase 5c-2's NAIVE UND-only failed catastrophically).
+SKIP_PATTERNS_GEN_TOWER = (
+    "_moe_gen",
+)
 
-def make_quant_predicate():
-    """Skip only the always-bf16 small modules. Quantize EVERYTHING else
-    including both UND and GEN towers — AWQ scale fusion should have made
-    GEN-tower quantization viable."""
+
+def make_quant_predicate(skip_gen_tower: bool = False):
+    """Skip the always-bf16 small modules, optionally also skip GEN tower."""
+    skip = list(SKIP_PATTERNS_ALWAYS)
+    if skip_gen_tower:
+        skip += list(SKIP_PATTERNS_GEN_TOWER)
+    skip_tuple = tuple(skip)
     def pred(path: str, module: nn.Module) -> bool:
-        return not any(p in path for p in SKIP_PATTERNS_ALWAYS)
+        return not any(p in path for p in skip_tuple)
     return pred
 
 
@@ -78,6 +87,11 @@ def main() -> int:
     ap.add_argument("--group-size", type=int, default=128)
     ap.add_argument("--n-grid", type=int, default=20,
                     help="Alpha grid resolution (default 20 = 21 alphas tested)")
+    ap.add_argument("--skip-gen-tower", action="store_true",
+                    help="Keep *_moe_gen projections + MLPs at bf16. AWQ scale "
+                         "fusion still runs on GEN-tower fusion groups (math is "
+                         "invariant so no behavior change), but the GEN consumers "
+                         "aren't quantized — preserves GEN-path precision.")
     args = ap.parse_args()
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -89,6 +103,8 @@ def main() -> int:
     print(f"┃ bits       : {args.bits}")
     print(f"┃ group_size : {args.group_size}")
     print(f"┃ n_grid     : {args.n_grid}  ({args.n_grid + 1} alphas tested per group)")
+    print(f"┃ skip GEN   : {args.skip_gen_tower} "
+          f"({'GEN tower stays bf16' if args.skip_gen_tower else 'full quant both towers'})")
     print(f"┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     # ─── 1. Load Lance bf16 ─────────────────────────────────────────────────
@@ -199,10 +215,11 @@ def main() -> int:
         group_size=args.group_size,
         bits=args.bits,
         mode="affine",
-        quant_predicate=make_quant_predicate(),
+        quant_predicate=make_quant_predicate(args.skip_gen_tower),
     )
     # Annotate the config so loader code knows this is AWQ-calibrated
     quantized_config["quantization"]["awq"] = True
+    quantized_config["quantization"]["skip_gen_tower"] = args.skip_gen_tower
     quantized_config["quantization"]["awq_calibration"] = {
         "n_grid": args.n_grid,
         "calibration_stats_dir": str(args.stats.name),
@@ -247,6 +264,8 @@ def main() -> int:
         "fusion_groups_applied": awq_applied,
         "fusion_groups_skipped": awq_skipped,
         "skip_patterns_always": list(SKIP_PATTERNS_ALWAYS),
+        "skip_gen_tower": args.skip_gen_tower,
+        "skip_patterns_gen": list(SKIP_PATTERNS_GEN_TOWER) if args.skip_gen_tower else [],
         "awq_per_group": awq_meta,
     }
     (args.out / "quantization_report.json").write_text(json.dumps(report, indent=2))

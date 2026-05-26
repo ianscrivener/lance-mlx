@@ -28,6 +28,7 @@ BF16_WEIGHTS    = MODELS_DIR / "Lance-3B-bf16"
 Q8_UND_WEIGHTS  = MODELS_DIR / "Lance-3B-8bit-und"
 AWQ_WEIGHTS     = MODELS_DIR / "Lance-3B-AWQ-INT4"
 AWQ_INT8_WEIGHTS = MODELS_DIR / "Lance-3B-AWQ-INT8"
+AWQ_UND_WEIGHTS  = MODELS_DIR / "Lance-3B-AWQ-INT4-und"
 VAE_SAFETENSORS = BF16_WEIGHTS / "vae.safetensors"
 OUT_DIR = REPO_ROOT / "notes" / "phase5n_diagnostics" / "phase5c3_awq_port" / "validation"
 
@@ -101,10 +102,9 @@ def main() -> int:
 
     results = {}
     for label, dir_ in [
-        ("bf16",     BF16_WEIGHTS),
-        ("8bit-und", Q8_UND_WEIGHTS),
-        ("AWQ-INT4", AWQ_WEIGHTS),
-        ("AWQ-INT8", AWQ_INT8_WEIGHTS),
+        ("bf16",         BF16_WEIGHTS),
+        ("AWQ-INT4",     AWQ_WEIGHTS),
+        ("AWQ-INT4-und", AWQ_UND_WEIGHTS),
     ]:
         if not dir_.exists():
             print(f"SKIP {label}: {dir_} not found")
@@ -133,7 +133,8 @@ def main() -> int:
             arr, _, hf = results[label][plabel]
             grid.paste(Image.fromarray(arr), (x, y))
             color = {'bf16': 'lightgreen', '8bit-und': 'orange',
-                     'AWQ-INT4': 'cyan', 'AWQ-INT8': 'yellow'}.get(label, 'white')
+                     'AWQ-INT4': 'cyan', 'AWQ-INT8': 'yellow',
+                     'AWQ-INT4-und': 'magenta'}.get(label, 'white')
             draw.text((x + 4, y - pad + 4), f"{label}  {plabel}  HF={hf:.1e}",
                       fill=color, font=font)
     grid_path = OUT_DIR / "_compare_grid.png"

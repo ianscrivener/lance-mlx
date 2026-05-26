@@ -11,7 +11,8 @@ All three repos live in the **[Lance MLX collection](https://huggingface.co/coll
 | Repo | Status | Use for |
 |---|---|---|
 | [`mlx-community/Lance-3B-bf16`](https://huggingface.co/mlx-community/Lance-3B-bf16) | 🟢 Production | `t2i`, `image_edit`, `x2t_image` (full quality, ~15 GB) |
-| [`mlx-community/Lance-3B-8bit`](https://huggingface.co/mlx-community/Lance-3B-8bit) | ⚠️ Known broken | Quality regression vs bf16 found 2026-05-22; needs DWQ (Phase 5c deferred) |
+| [`mlx-community/Lance-3B-AWQ-INT4`](https://huggingface.co/mlx-community/Lance-3B-AWQ-INT4) | 🟢 Production (VQA only) | `x2t_image` on 8-16 GB Macs (5.65 GB repo, 3.31 GB LLM, 6-9× faster long-form decode). **Don't use for t2i** — see Phase 5c-3 notes. |
+| [`mlx-community/Lance-3B-8bit`](https://huggingface.co/mlx-community/Lance-3B-8bit) | ⚠️ Known broken | Quality regression vs bf16 (Phase 5c-2 empirically refuted naive 8-bit at any tower-skip config; superseded by Lance-3B-AWQ-INT4 above for VQA). |
 | [`mlx-community/Wan2.2-VAE-Lance-bf16`](https://huggingface.co/mlx-community/Wan2.2-VAE-Lance-bf16) | 🟢 Production | 48-ch Wan2.2 VAE (standalone, shared by image + video pipelines) |
 | [`mlx-community/Lance-3B-Video-bf16`](https://huggingface.co/mlx-community/Lance-3B-Video-bf16) | 🟢 Production through 768²×25f | `t2v` (photoreal after Phase 5j + 5m fixes), `x2t_video`, `video_edit` |
 

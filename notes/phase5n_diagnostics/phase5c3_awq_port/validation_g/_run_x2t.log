@@ -1,0 +1,81 @@
+=== Phase 5c-3f — x2t_image AWQ-INT4 oracle sweep ===
+  cases: 6
+  oracle: x2t_image_sample_ts30_tts3.5_seed42_cfg4.0_kvcache_20260520_084258
+  variants: bf16 + AWQ-INT4
+  greedy decode, max_new_tokens=256
+
+
+╔══ bf16 (Lance-3B-bf16) ══════════════════════════
+  loaded in 2.4s
+       image-understanding-case-01.png    0.6s
+       image-understanding-case-02.png    0.6s
+       image-understanding-case-03.png    1.1s
+       image-understanding-case-04.png    6.3s
+       image-understanding-case-05.png   11.9s
+       image-understanding-case-06.png    8.5s
+
+╔══ AWQ-INT4 (Lance-3B-AWQ-INT4) ══════════════════════════
+  loaded in 1.8s
+       image-understanding-case-01.png    0.3s
+       image-understanding-case-02.png    0.3s
+       image-understanding-case-03.png    0.4s
+       image-understanding-case-04.png    0.6s
+       image-understanding-case-05.png    1.4s
+       image-understanding-case-06.png    1.2s
+
+╔══ AWQ-INT4-und (Lance-3B-AWQ-INT4-und) ══════════════════════════
+  loaded in 1.7s
+       image-understanding-case-01.png    0.4s
+       image-understanding-case-02.png    0.5s
+       image-understanding-case-03.png    0.5s
+       image-understanding-case-04.png    1.9s
+       image-understanding-case-05.png    5.4s
+       image-understanding-case-06.png    4.6s
+
+══════ Per-case comparison ════════════════════════════════════
+
+── case 01 ──
+  Q: Is the largest segment greater than sum of all the other segments?
+  bf16        : Yes
+  AWQ-INT4    : Yes
+  AWQ-INT4-und: Yes
+
+── case 02 ──
+  Q: What percentage of respondents want better border security?
+  bf16        : 43
+  AWQ-INT4    : 43
+  AWQ-INT4-und: 43
+
+── case 03 ──
+  Q: What is the license plate number of the car?
+  bf16        : Bx62bfy
+  AWQ-INT4    : Byfky
+  AWQ-INT4-und: Byfky
+
+── case 04 ──
+  Q: According to the data from the proprietary market research, how much amount was spent on the promotional meetings and events during 1998?
+  bf16        : It is estimated that around 1.8 million dollars was spent on promotional meetings and events during ...
+  AWQ-INT4    : It is estimated that 198% of the promotional meetings and events were spent on the promotional effor...
+  AWQ-INT4-und: It is estimated that 198% of the promotional meetings and events were spent on the promotional effor...
+
+── case 05 ──
+  Q: What is the appearance of the Colosseum in Rome, Italy?
+  bf16        : The Colosseum in Rome, Italy is an iconic ancient amphitheater with a rich history dating back to th...
+  AWQ-INT4    : The Colosseum in Rome, Italy is an iconic ancient amphitheater with a history dating back to the 4th...
+  AWQ-INT4-und: The Colosseum in Rome, Italy is an iconic ancient amphitheater with a history dating back to the 4th...
+
+── case 06 ──
+  Q: How does a total solar eclipse look like from Earth?
+  bf16        : A total solar eclipse would appear as a circular shape in the sky, with the entire sun being blocked...
+  AWQ-INT4    : A total solar eclipse would appear as a circular silhouette of the moon in the center of the sun's c...
+  AWQ-INT4-und: A total solar eclipse would appear as a circular silhouette of the moon in the center of the sun's c...
+
+══════ Summary (vs bf16 reference) ═══════════════════════════
+         variant   exact-match  facts ≥60%
+        AWQ-INT4    2 /  6        4 /  6
+    AWQ-INT4-und    2 /  6        4 /  6
+  reference: Reza2kn PyTorch AWQ-INT4: 5/6 oracle correct (x2t_image only)
+
+  VERDICT: ⚠ MARGINAL — close to Reza2kn but missed a case; inspect failures
+
+  full report: /Users/dustinnielson/DEV_INT/lance-mlx-research/lance-mlx/notes/phase5n_diagnostics/phase5c3_awq_port/x2t_validation/x2t_oracle_report.json

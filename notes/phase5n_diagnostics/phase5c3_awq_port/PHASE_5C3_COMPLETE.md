@@ -1,10 +1,9 @@
-# Phase 5c-3 — AWQ MLX port: complete (with caveats)
+# Phase 5c-3 — AWQ MLX port: complete + shipped to mlx-community
 
-**Date:** 2026-05-25 (second session)
-**Status:** Code complete. Math proven. AWQ-INT4 shows measurable
-improvement over naive quantization but not enough to ship for t2i.
-Likely shippable for x2t_image (VQA) per Reza2kn's pattern — untested
-here, follow-up needed.
+**Date:** 2026-05-25 (sub-phases 3a-3f) and 2026-05-26 (sub-phase 3g + publish)
+**Status:** **Complete and SHIPPED.** `mlx-community/Lance-3B-AWQ-INT4`
+published 2026-05-26 as a VQA-scoped variant. All sub-phases 3a–3g
+documented and validated.
 
 ## Sub-phases — all complete
 
@@ -14,7 +13,10 @@ here, follow-up needed.
 | 5c-3b | ✅ awq_search_scale in MLX | `src/lance_mlx/quant/awq.py` — unit test: +51% INT4 output-error reduction |
 | 5c-3c | ✅ Calibration hooks | `src/lance_mlx/quant/calibrate.py` (ActStats Linear subclass) + `scripts/quant/calibrate_awq.py` (runner); 504/504 modules covered, 152,790 tokens each |
 | 5c-3d | ✅ Apply + quantize pipeline | `scripts/quant/apply_awq_quantize.py` — produces Lance-3B-AWQ-INT4 in 15s |
-| 5c-3e | ✅ Validation vs bf16 | `scripts/diagnostics/d_p5c3_validate.py` — 4-prompt sweep at 384² |
+| 5c-3e | ✅ t2i validation vs bf16 | `scripts/diagnostics/d_p5c3_validate.py` — REFUTED for t2i shipping |
+| 5c-3f | ✅ VQA validation vs bf16 | `scripts/diagnostics/d_p5c3f_x2t_sweep.py` — MARGINAL shippable for VQA |
+| 5c-3g | ✅ AWQ-UND-only experiment | REFUTED — strictly worse than AWQ full (same VQA, 2.2× size, slower). See `PHASE_5C3G_FINDINGS.md` |
+| publish | ✅ mlx-community upload | `scripts/quant/publish_awq_int4.py` — VQA-scoped model card |
 
 ## Quantitative results (t2i, 384², seed=42, 4-prompt sweep)
 

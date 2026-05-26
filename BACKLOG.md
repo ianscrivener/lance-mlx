@@ -45,8 +45,10 @@ catastrophically (~80% HF detail loss across 4-prompt sweep). Also
 discovered mlx-lm's `dwq_quantize` has a hardcoded `bits < 8` gate, so
 "8-bit DWQ" with the stock harness is a no-op. Full writeup:
 `notes/phase5n_diagnostics/phase5c2_validation/FINDINGS.md`.
-**Phase 5c-3 COMPLETED (2026-05-25)** — full AWQ port to MLX, end-to-end
-validated. Sub-phases 3a-3f all delivered:
+**Phase 5c-3 COMPLETED + SHIPPED (2026-05-26)** — full AWQ port to MLX,
+end-to-end validated, and published as `mlx-community/Lance-3B-AWQ-INT4`
+(VQA-scoped variant; 5.65 GB repo, 3.31 GB LLM). All sub-phases 3a-3g
+delivered:
 
 - 3a/3b: AWQ math kernel ported + unit-tested (+51% output-error reduction)
 - 3c: calibration system (ActStats hook → 504/504 module coverage)
@@ -59,9 +61,14 @@ validated. Sub-phases 3a-3f all delivered:
   preserves ~4/6 cases vs bf16 with **6-9× decode speedup**. Caveats:
   precision-required outputs degrade (license plates, currency, exact
   numbers); long-form descriptive VQA closely matches bf16.
+- 3g: AWQ-UND-only experiment — REFUTED. Identical VQA quality to
+  AWQ full quant, 2.2× larger, 3-4× slower long decodes. No
+  shipping case; AWQ full quant is strictly better. See
+  `phase5c3_awq_port/PHASE_5C3G_FINDINGS.md`.
 
-**Shippable artifact: `mlx-community/Lance-3B-AWQ-INT4-VQA`** (3.31 GB)
-for VQA on 8-16 GB Macs. Full writeup:
+**Shipped artifact: [`mlx-community/Lance-3B-AWQ-INT4`](https://huggingface.co/mlx-community/Lance-3B-AWQ-INT4)**
+(3.31 GB LLM; full repo 5.65 GB incl. VAE + ViT). For VQA on 8-16 GB
+Macs. Honest VQA-scoped model card with caveats. Full writeup:
 `notes/phase5n_diagnostics/phase5c3_awq_port/PHASE_5C3_COMPLETE.md`
 and `.../x2t_validation/FINDINGS.md`.
 
