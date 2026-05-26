@@ -1,0 +1,46 @@
+=== Phase 5c-3e validation: bf16 vs 8bit-und vs AWQ-INT4 ===
+  prompts: 4  scale: 384×384  seed=42
+
+
+╔══ bf16 (Lance-3B-bf16) ══════════════════════════
+  loaded in 1.9s
+     P1_cat_stop:   19.6s  mean=149.3  std=62.3  HF=4.82e+08
+       P2_dragon:   21.7s  mean=72.2  std=39.3  HF=3.45e+08
+    P3_cat_skate:   22.4s  mean=101.3  std=55.9  HF=4.85e+08
+      P4_cat_dog:   22.3s  mean=90.2  std=59.4  HF=4.18e+08
+
+╔══ AWQ-INT4 (Lance-3B-AWQ-INT4) ══════════════════════════
+  loaded in 1.7s
+     P1_cat_stop:   16.9s  mean=81.3  std=31.3  HF=9.99e+07
+       P2_dragon:   18.5s  mean=41.1  std=17.4  HF=5.08e+07
+    P3_cat_skate:   18.5s  mean=87.7  std=29.9  HF=1.05e+08
+      P4_cat_dog:   18.6s  mean=76.6  std=35.2  HF=8.84e+07
+
+╔══ AWQ-INT4-und (Lance-3B-AWQ-INT4-und) ══════════════════════════
+  loaded in 1.9s
+     P1_cat_stop:   18.7s  mean=95.2  std=35.5  HF=1.12e+08
+       P2_dragon:   19.5s  mean=47.4  std=19.0  HF=4.52e+07
+    P3_cat_skate:   19.6s  mean=103.0  std=44.1  HF=1.12e+08
+      P4_cat_dog:   19.6s  mean=73.5  std=19.3  HF=4.37e+07
+
+──── Building 3×4 comparison grid ────
+  saved: /Users/dustinnielson/DEV_INT/lance-mlx-research/lance-mlx/notes/phase5n_diagnostics/phase5c3_awq_port/validation/_compare_grid.png
+
+──── HF detail & pixel diff vs bf16 ────
+          prompt     variant          HF    HF Δ%   pix_mean_diff   pix_95p
+     P1_cat_stop        bf16    4.82e+08  baseline               -         -
+     P1_cat_stop    AWQ-INT4    9.99e+07   -79.3%           83.11     182.0
+     P1_cat_stop  AWQ-INT4-und    1.12e+08   -76.7%           80.28     174.0
+       P2_dragon        bf16    3.45e+08  baseline               -         -
+       P2_dragon    AWQ-INT4    5.08e+07   -85.3%           35.52     100.0
+       P2_dragon  AWQ-INT4-und    4.52e+07   -86.9%           32.35      94.0
+    P3_cat_skate        bf16    4.85e+08  baseline               -         -
+    P3_cat_skate    AWQ-INT4    1.05e+08   -78.2%           46.75     117.0
+    P3_cat_skate  AWQ-INT4-und    1.12e+08   -76.9%           47.38     117.0
+      P4_cat_dog        bf16    4.18e+08  baseline               -         -
+      P4_cat_dog    AWQ-INT4    8.84e+07   -78.9%           53.64     143.0
+      P4_cat_dog  AWQ-INT4-und    4.37e+07   -89.5%           49.56     133.0
+
+=== Verdict heuristic ===
+  AWQ-INT4 average HF Δ vs bf16: -80.4%
+  → INVESTIGATE: substantial detail loss; debug before shipping

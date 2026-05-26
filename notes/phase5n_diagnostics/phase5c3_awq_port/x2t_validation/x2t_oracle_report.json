@@ -1,0 +1,72 @@
+{
+  "n_cases": 6,
+  "verdict": "\u26a0 MARGINAL \u2014 close to Reza2kn but missed a case; inspect failures",
+  "variant_parity": {
+    "AWQ-INT4": {
+      "exact_vs_bf16": 2,
+      "facts_match_bf16": 4
+    },
+    "AWQ-INT4-und": {
+      "exact_vs_bf16": 2,
+      "facts_match_bf16": 4
+    }
+  },
+  "latency_s_per_case": {
+    "bf16": [
+      0.5596894999980577,
+      0.6308609580009943,
+      1.102742124996439,
+      6.341964375002135,
+      11.897637083005975,
+      8.473689042002661
+    ],
+    "AWQ-INT4": [
+      0.338534582995635,
+      0.3427750830014702,
+      0.35323433300072793,
+      0.6458130419996451,
+      1.374144957997487,
+      1.2073549579945393
+    ],
+    "AWQ-INT4-und": [
+      0.4322204169948236,
+      0.47988091700244695,
+      0.5335755420019268,
+      1.9191176250024,
+      5.40015158400638,
+      4.559279875000357
+    ]
+  },
+  "answers_per_case": {
+    "image-understanding-case-01.png": {
+      "bf16": "Yes",
+      "AWQ-INT4": "Yes",
+      "AWQ-INT4-und": "Yes"
+    },
+    "image-understanding-case-02.png": {
+      "bf16": "43",
+      "AWQ-INT4": "43",
+      "AWQ-INT4-und": "43"
+    },
+    "image-understanding-case-03.png": {
+      "bf16": "Bx62bfy",
+      "AWQ-INT4": "Byfky",
+      "AWQ-INT4-und": "Byfky"
+    },
+    "image-understanding-case-04.png": {
+      "bf16": "It is estimated that around 1.8 million dollars was spent on promotional meetings and events during 1998. This amount contributed to the growth of the pharmaceutical industry and helped to launch the demand for medical products and services in the country.",
+      "AWQ-INT4": "It is estimated that 198% of the promotional meetings and events were spent on the promotional efforts of PREMARIN.",
+      "AWQ-INT4-und": "It is estimated that 198% of the promotional meetings and events were spent on the promotional efforts of PREMARIN."
+    },
+    "image-understanding-case-05.png": {
+      "bf16": "The Colosseum in Rome, Italy is an iconic ancient amphitheater with a rich history dating back to the 4th century AD. It is a large, semi-circular structure made of stone and features multiple tiers of seating, which surrounded a central open area where performances and events would have taken place. The Colosseum is renowned for its architectural grandeur, its status as a symbol of Roman culture, and its enduring appeal to tourists and history buffs alike.",
+      "AWQ-INT4": "The Colosseum in Rome, Italy is an iconic ancient amphitheater with a history dating back to the 4th century AD. It is a large, semi-circular stone structure that is mostly in ruins but still stands as an impressive testament to its historical significance. The Colosseum is located on the Roman plain, on the outskirts of modern Rome, and is surrounded by modern buildings and infrastructure.",
+      "AWQ-INT4-und": "The Colosseum in Rome, Italy is an iconic ancient amphitheater with a history dating back to the 4th century AD. It is a large, semi-circular stone structure that is mostly in ruins but still stands as an impressive testament to its historical significance. The Colosseum is located on the Roman plain, on the outskirts of modern Rome, and is surrounded by modern buildings and infrastructure."
+    },
+    "image-understanding-case-06.png": {
+      "bf16": "A total solar eclipse would appear as a circular shape in the sky, with the entire sun being blocked by the Earth. The sky around the eclipse would be darker, with the sun's corona glowing brightly in the surrounding atmosphere. This contrast of light and dark areas creates the appearance of a completely black circle in the center of the sky.",
+      "AWQ-INT4": "A total solar eclipse would appear as a circular silhouette of the moon in the center of the sun's corona, surrounded by a ring of light. The corona appears as a glowing halo around the moon, with the sun's light being blocked by the moon's shadow. This creates a striking and beautiful visual effect that can be observed from Earth.",
+      "AWQ-INT4-und": "A total solar eclipse would appear as a circular silhouette of the moon in the center of the sun's corona, surrounded by a ring of light. The corona appears as a glowing halo around the moon, with the sun's light being blocked by the moon's shadow. This creates a striking and beautiful visual effect that can be observed from Earth."
+    }
+  }
+}
