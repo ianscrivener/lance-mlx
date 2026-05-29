@@ -315,3 +315,134 @@ video understanding. Likely no surprises given the 2/6 already match
 (VQA verbatim, captioning content-correct).
 
 **Trigger:** If we need a complete oracle pass for a paper/writeup.
+
+---
+
+## Perf-1 — `mx.compile()` on Euler loop
+
+**Status:** Not started.
+
+**What:** Wrap the per-step Euler body in each generation pipeline
+(`t2i.py`, `t2v.py`, `image_edit.py`, `video_edit.py`) with
+`mx.compile()`. MLX JIT fuses the compute graph across the step,
+eliminates Python-dispatch overhead, and collapses intermediate
+allocations — all without changing numerics.
+
+**Expected gain:** 2–4× wall-clock speedup on the flow loop (Apple
+Silicon is memory-bandwidth-bound; fusing reduces round-trips). First
+step is measurable: add `mx.compile()`, run `z-test.sh` before/after,
+record delta.
+
+**Effort:** Low — one decorator / compile-wrapper per pipeline file.
+No architectural changes. Safe to land independently of any other item.
+
+**Benefit:** Free throughput on existing hardware. Directly improves
+the `--steps 30` default case and makes the interactive demo more
+responsive.
+
+**Trigger:** Any time. Self-contained and low-risk.
+
+---
+
+## Feature-1 — multi-turn understanding server
+
+**Status:** Not started. Design settled in session (2026-05-25).
+
+**What:** Two changes:
+
+1. **`understanding.py`** — add `history: list[dict] | None = None`
+   parameter to `generate()`. Build the Qwen2.5-VL multi-turn prompt:
+   image tokens appear only in the first user message; subsequent turns
+   append `{"role": "user", "content": q}` / `{"role": "assistant",
+   "content": a}` pairs. ViT forward runs once; follow-up turns are
+   text-only token appends.
+
+2. **`src/lance_mlx/server.py`** — FastAPI server that:
+   - Loads `UnderstandingPipeline` once at startup (eliminates ~30s
+     per-call weight reload).
+   - `POST /session/start` — accepts `image_path`, stores PIL + empty
+     history, returns `session_id`.
+   - `POST /session/ask` — accepts `session_id` + `question`, calls
+     `generate(image, question, history=sess["history"])`, appends
+     Q/A pair to session history, returns answer.
+   - In-memory session dict (no persistence needed for MVP).
+
+**Effort:** Short — `understanding.py` change is ~20 lines; `server.py`
+is ~60 lines. Needs `fastapi` + `uvicorn` added to optional deps in
+`pyproject.toml`.
+
+**Benefit:** Removes the biggest UX friction for understanding tasks
+(weight reload on every call). Enables natural multi-turn VQA — "what
+is in the foreground?" → "what colour is it?" → "how does it relate to
+the background?" — with full conversational context.
+
+**Trigger:** Ready to implement now.
+
+---
+
+## Feature-2 — Mode 3: Text → Text pipeline
+
+**Status:** Not started.
+
+**What:** Pure text generation using the Lance LLM backbone (Qwen2.5
+3B) without any vision tokens. Exposes the underlying chat/reasoning
+capability already present in the weights. Requires a thin
+`TextPipeline` wrapper (no VAE, no ViT) and a `--task t2t` CLI entry.
+
+**Effort:** Very low — the backbone already supports text-only forward.
+No new model loading; reuse the existing LanceModel + tokenizer.
+Essentially a stripped-down version of `understanding.py` with no image
+encoding step.
+
+**Benefit:** Completes Mode 3 of the 9-mode capability grid. Useful as
+a baseline / sanity check for the LLM tower independently of vision.
+
+**Trigger:** Low-hanging fruit. Can be done in under an hour.
+
+---
+
+## Feature-3 — Mode 5 (TI2V) and Mode 7 (TV2I) investigation
+
+**Status:** Research required before implementation.
+
+**What:** Determine whether the Lance-3B weights were trained on:
+- **Mode 5** (Text+Image → Video): image-conditioned video generation /
+  image animation.
+- **Mode 7** (Text+Video → Image): video-to-image synthesis / frame
+  extraction with instruction.
+
+Both are architecturally plausible (ViT encoder + video generation path
+both exist), but only trainable tasks are in the weights.
+
+**Effort:** Research first — inspect the upstream ByteDance codebase /
+paper for task enum definitions. If confirmed trained: implement token
+sequence layout for each (likely mirrors `image_edit` + `t2v` combined).
+
+**Benefit:** Would complete 8 of 9 modes. Mode 5 in particular is high
+value: image-reference + text → video is a common creative workflow
+(animate a character, reference a style frame).
+
+**Trigger:** After confirming upstream training coverage.
+
+---
+
+## Perf-2 — DPM-Solver++ scheduler (step reduction)
+
+**Status:** Not started.
+
+**What:** Replace the current linear Euler schedule in `flow_head.py`
+with DPM-Solver++ (or DDIM-equivalent for flow matching). Goal: same
+perceptual quality at 8–12 steps instead of 30.
+
+**Current state:** `--steps 8` is already usable (tested in `z-test.sh`)
+but quality degrades vs 30 steps. A higher-order solver should close
+that gap.
+
+**Effort:** Medium — requires porting or adapting the solver to the
+flow-matching $t: 1 \to 0$ convention used by Lance, and validating
+quality parity against the 30-step oracle.
+
+**Benefit:** ~3× faster inference for the same output quality. Compounds
+with Perf-1 (`mx.compile()`) for total speedup.
+
+**Trigger:** After Perf-1 lands and baseline timing is established.
