@@ -98,7 +98,7 @@ HF_HUB_DISABLE_XET=1 uv run python scripts/04_x2t_image_demo.py \
 
 ## Schedulers
 
-Three modes for t2i inference, ordered fastest-to-slowest:
+Two schedulers ship in this repo:
 
 ### DPM-Solver++(2M) — ~2.4× faster, 12 steps
 ```bash
@@ -107,17 +107,6 @@ HF_HUB_DISABLE_XET=1 uv run python scripts/08_t2i_demo.py \
     --lance-weights ~/.cache/huggingface/hub/models--mlx-community--Lance-3B-bf16/snapshots/*/ \
     --vae-weights   ~/.cache/huggingface/hub/models--mlx-community--Lance-3B-bf16/snapshots/*/vae.safetensors \
     --scheduler dpm --steps 12
-```
-
-### Fast Euler — compiled transformer forward, 30 steps (~5% faster)
-
-Requires [`lance-mlx-studio`](https://github.com/ianscrivener/lance-mlx-studio) (`FastTextToImagePipeline` wraps `mx.compile()` around the transformer forward pass):
-
-```python
-from studio.pipeline.fast_t2i import FastTextToImagePipeline
-
-pipe = FastTextToImagePipeline.from_pretrained(weights_dir, vae_path)
-image = pipe.generate("a red apple on a wooden table", scheduler="euler", num_steps=30)
 ```
 
 ### Default Euler — quality baseline, 30 steps
@@ -132,10 +121,13 @@ HF_HUB_DISABLE_XET=1 uv run python scripts/08_t2i_demo.py \
 | Mode | Steps | Generate time | vs baseline |
 |---|---|---|---|
 | DPM-Solver++(2M) | 12 | ~78s | **2.4×** |
-| Fast Euler (compiled) | 30 | ~186s | 1.05× |
 | Default Euler | 30 | ~196s | — |
 
 _Benchmarked on Lance-3B-bf16, 768², seed=42, cfg_scale=4.0, M-series Apple Silicon._
+
+#### Related projects
+
+[`lance-mlx-studio`](https://github.com/ianscrivener/lance-mlx-studio) is a downstream wrapper that adds `mx.compile()` optimisation around the transformer forward pass (`FastTextToImagePipeline`), giving a further ~5% wall-clock reduction on top of the Euler baseline. It is not part of this repo and requires a separate install.
 
 ---
 

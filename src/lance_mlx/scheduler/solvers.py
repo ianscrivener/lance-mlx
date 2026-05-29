@@ -16,7 +16,14 @@ import mlx.core as mx
 
 
 class DPMSolverPlusPlus2M:
-    """DPM-Solver++(2M) for flow-matching (Adams-Bashforth 2-step).
+    """Variable-step Adams-Bashforth 2 applied to the flow-matching velocity ODE.
+
+    This is the flow-matching adaptation of the DPM-Solver++(2M) multistep
+    idea (Lu et al. 2022, https://arxiv.org/abs/2211.01095), NOT the exact
+    published algorithm.  The published formula operates on noise-prediction or
+    x-prediction diffusion ODEs with log-SNR substitution; here we apply the
+    same 2-step Adams-Bashforth extrapolation directly to dx/dt = -v(x, t),
+    which is the correct form for flow-matching models like Lance.
 
     First step falls back to Euler (no previous velocity available).
     Subsequent steps use the 2-step Adams-Bashforth formula, which

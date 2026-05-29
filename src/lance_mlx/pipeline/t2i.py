@@ -232,8 +232,6 @@ class TextToImagePipeline:
             print(f"  schedule: {[round(float(sched[i]), 4) for i in range(min(6, num_steps+1))]} ...")
 
         solver = DPMSolverPlusPlus2M() if scheduler == "dpm" else None
-        if solver is not None:
-            solver.reset()
 
         for step in range(num_steps):
             t = sched[step]
